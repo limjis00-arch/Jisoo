@@ -106,7 +106,7 @@
       const filteredItems = filterTag ? data.items.filter(i => (i.tags || []).includes(filterTag)) : data.items;
 
       return (
-        <div className="fade-in space-y-4">
+        <div className="fade-in space-y-4 pb-10">
           <div className="flex gap-2 overflow-x-auto hide-scrollbar pb-2">
             <button onClick={() => setFilterTag(null)} className={`px-4 py-1.5 rounded-full whitespace-nowrap text-sm font-bold ${!filterTag ? 'bg-indigo-600 text-white' : 'bg-white text-slate-500 border border-slate-200'}`}>전체</button>
             {allTags.map(tag => (
@@ -259,10 +259,11 @@
     };
 
     // ==========================================
-    // 3. 지수의 루틴 (Routine) + 포도알 연동
+    // 3. 오늘 루틴 (Routine) + 포도알 달성 현황 분리
     // ==========================================
     const RoutineApp = ({ data, updateData }) => {
       const [date, setDate] = useState(getTodayStr());
+      const [showStats, setShowStats] = useState(false);
       
       const toggleStatus = (itemId, status) => {
         const newHist = { ...data.history };
@@ -290,122 +291,211 @@
       };
 
       return (
-        <div className="fade-in space-y-4">
+        <div className="fade-in space-y-4 pb-10">
           <div className="flex justify-between items-center bg-white p-3 rounded-xl shadow-sm border border-slate-100">
             <button onClick={() => setDate(addDays(date, -1))} className="p-2 text-slate-400">&lt;</button>
-            <span className="font-bold text-lg text-emerald-600">{date} 루틴</span>
+            <span className="font-bold text-lg text-emerald-600">{date} 오늘 루틴</span>
             <button onClick={() => setDate(addDays(date, 1))} className="p-2 text-slate-400">&gt;</button>
           </div>
 
-          {data.categories.length === 0 && <p className="text-center text-slate-400 py-10">설정에서 루틴을 추가해주세요. 기존 루틴 앱의 데이터가 자동으로 복구되었습니다!</p>}
+          {data.categories.length === 0 && <p className="text-center text-slate-400 py-10">루틴 데이터가 없습니다.</p>}
 
+          {/* 루틴 체크 리스트 */}
           {data.categories.map(cat => (
             <Accordion key={cat.id} title={cat.name} rightElement={<button onClick={()=>restAll(cat.id)} className="text-xs bg-orange-100 text-orange-600 px-2 py-1 rounded shadow-sm">전체 휴식</button>}>
               {cat.items.map(item => {
                 const status = data.history[date]?.[item.id];
-                const stats = getGrapeStats(item.id);
                 return (
-                  <div key={item.id} className="flex flex-col p-3 mb-2 bg-slate-50 rounded-xl border border-slate-100">
-                    <div className="flex justify-between items-center mb-2">
-                      <span className={`font-medium ${status ? 'text-slate-400 line-through' : 'text-slate-700'}`}>{item.name}</span>
-                      <div className="flex gap-1">
-                        <button onClick={() => toggleStatus(item.id, 'rest')} className={`p-2 rounded-lg ${status==='rest'?'bg-orange-200 text-orange-700':'bg-white text-slate-400'}`}><Icons.Rest/></button>
-                        <button onClick={() => toggleStatus(item.id, 'completed')} className={`p-2 rounded-lg ${status==='completed'?'bg-emerald-200 text-emerald-700':'bg-white text-slate-400'}`}><Icons.Check/></button>
-                      </div>
-                    </div>
-                    <div className="bg-white p-2 rounded-lg border border-emerald-50 flex items-center justify-between text-xs">
-                      <span className="font-bold text-purple-600">🍇 {stats.bunches}송이</span>
-                      <div className="flex-1 mx-2 bg-purple-100 h-2 rounded-full overflow-hidden">
-                        <div className="bg-purple-500 h-full transition-all" style={{width: `${stats.current}%`}}></div>
-                      </div>
-                      <span className="text-slate-500">{stats.current}/100</span>
+                  <div key={item.id} className="flex justify-between items-center p-3 mb-2 bg-slate-50 rounded-xl border border-slate-100">
+                    <span className={`font-medium ${status ? 'text-slate-400 line-through' : 'text-slate-700'}`}>{item.name}</span>
+                    <div className="flex gap-1">
+                      <button onClick={() => toggleStatus(item.id, 'rest')} className={`p-2 rounded-lg ${status==='rest'?'bg-orange-200 text-orange-700':'bg-white text-slate-400'}`}><Icons.Rest/></button>
+                      <button onClick={() => toggleStatus(item.id, 'completed')} className={`p-2 rounded-lg ${status==='completed'?'bg-emerald-200 text-emerald-700':'bg-white text-slate-400'}`}><Icons.Check/></button>
                     </div>
                   </div>
                 );
               })}
             </Accordion>
           ))}
+
+          {/* 포도알 달성 현황 토글 버튼 */}
+          {data.categories.length > 0 && (
+            <button onClick={() => setShowStats(!showStats)} className="w-full py-4 bg-purple-50 text-purple-700 font-bold rounded-xl border border-purple-100 mt-6 shadow-sm flex items-center justify-center gap-2">
+              {showStats ? '포도알 달성 현황 숨기기' : '루틴별 포도알 현황 확인 🍇'}
+            </button>
+          )}
+
+          {/* 포도알 달성 현황 상세창 */}
+          {showStats && (
+            <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 space-y-4 fade-in">
+              <h3 className="font-bold text-slate-800 border-b border-slate-100 pb-3 mb-3">루틴 누적 달성 현황 (포도알)</h3>
+              {data.categories.map(cat => (
+                <div key={cat.id} className="mb-4">
+                  <h4 className="text-sm font-bold text-slate-500 mb-2">{cat.name}</h4>
+                  {cat.items.map(item => {
+                    const stats = getGrapeStats(item.id);
+                    return (
+                      <div key={item.id} className="mb-3 bg-slate-50 p-3 rounded-xl border border-slate-100">
+                        <div className="flex justify-between items-end text-xs mb-2">
+                          <span className="font-medium text-slate-700">{item.name}</span>
+                          <span className="font-bold text-purple-600">완성 {stats.bunches}송이 ({stats.current}/100)</span>
+                        </div>
+                        <div className="bg-purple-100 h-2.5 rounded-full overflow-hidden">
+                          <div className="bg-purple-500 h-full transition-all" style={{width: `${stats.current}%`}}></div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       );
     };
 
     // ==========================================
-    // 4. 100일 포도알 챌린지 (Grape Challenge)
+    // 4. 100일 포도알 챌린지 (Grape Challenge) 
     // ==========================================
     const GrapeApp = ({ data, updateData }) => {
-      const [isOpen, setIsOpen] = useState(false);
-      const [title, setTitle] = useState('');
+      const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+      const [newTitle, setNewTitle] = useState('');
+      
+      const [isRecordModalOpen, setIsRecordModalOpen] = useState(false);
+      const [selectedChallengeId, setSelectedChallengeId] = useState(null);
+      const [selectedDay, setSelectedDay] = useState(null);
+      
       const [recordDate, setRecordDate] = useState(getTodayStr());
+      const [recordNote, setRecordNote] = useState('');
 
       const handleAdd = () => {
-        if(!title) return;
-        const newC = { id: generateId(), title, records: {} }; 
+        if(!newTitle.trim()) return;
+        const newC = { id: generateId(), title: newTitle, records: {} }; 
         updateData({ ...data, challenges: [...data.challenges, newC] });
-        setTitle(''); setIsOpen(false);
+        setNewTitle(''); setIsAddModalOpen(false);
       };
 
-      const toggleRecord = (cid) => {
+      const openRecordModal = (challengeId, dayNum) => {
+        setSelectedChallengeId(challengeId);
+        setSelectedDay(dayNum);
+        
+        const c = data.challenges.find(x => x.id === challengeId);
+        const existingRecord = c.records[dayNum];
+        
+        setRecordNote(existingRecord?.note || '');
+        setRecordDate(existingRecord?.date || getTodayStr());
+        setIsRecordModalOpen(true);
+      };
+
+      const handleSaveRecord = () => {
         const newC = data.challenges.map(c => {
-          if(c.id === cid) {
-            const newR = {...c.records};
-            if(newR[recordDate]) delete newR[recordDate]; else newR[recordDate] = true;
-            return {...c, records: newR};
+          if(c.id === selectedChallengeId) {
+            return {
+              ...c,
+              records: {
+                ...c.records,
+                [selectedDay]: { completed: true, note: recordNote, date: recordDate }
+              }
+            };
           }
           return c;
         });
         updateData({...data, challenges: newC});
+        setIsRecordModalOpen(false);
+      };
+
+      const handleRemoveRecord = () => {
+        const newC = data.challenges.map(c => {
+          if(c.id === selectedChallengeId) {
+            const newRecords = {...c.records};
+            delete newRecords[selectedDay];
+            return {...c, records: newRecords};
+          }
+          return c;
+        });
+        updateData({...data, challenges: newC});
+        setIsRecordModalOpen(false);
       };
 
       return (
-        <div className="fade-in space-y-4">
-          <button onClick={()=>setIsOpen(true)} className="w-full py-4 bg-purple-600 text-white rounded-xl font-bold flex justify-center gap-2 shadow-md"><Icons.Plus/> 새 포도알 챌린지</button>
+        <div className="fade-in space-y-4 pb-10">
+          <button onClick={()=>setIsAddModalOpen(true)} className="w-full py-4 bg-purple-600 text-white rounded-xl font-bold flex justify-center gap-2 shadow-md"><Icons.Plus/> 새 포도알 챌린지</button>
 
           {data.challenges.length === 0 && <p className="text-center text-slate-400 py-10">진행 중인 챌린지가 없습니다.</p>}
 
           {data.challenges.map(c => {
             const total = Object.keys(c.records).length;
             const bunches = Math.floor(total/100);
-            const current = total % 100;
+            
+            // 100개 포도알 렌더링
+            const grapesHTML = [];
+            for (let i = 1; i <= 100; i++) {
+              const record = c.records[i];
+              const isCompleted = !!record;
+              grapesHTML.push(
+                <button key={i} onClick={() => openRecordModal(c.id, i)} className={`aspect-square rounded-full flex flex-col items-center justify-center transition-transform active:scale-95 shadow-sm overflow-hidden p-0.5 ${isCompleted ? 'bg-gradient-to-br from-purple-500 to-purple-700 text-white' : 'bg-white text-slate-400 border border-slate-200'}`}>
+                  <span className="font-bold text-[10px] md:text-xs leading-none">{i}</span>
+                  {record?.note && <span className="text-[8px] font-normal opacity-80 truncate w-full text-center mt-0.5">{record.note}</span>}
+                </button>
+              );
+            }
 
             return (
-              <div key={c.id} className="bg-white p-5 rounded-2xl shadow-sm border border-purple-100">
+              <div key={c.id} className="bg-white p-4 sm:p-5 rounded-2xl shadow-sm border border-purple-100">
                 <div className="flex justify-between items-center mb-4">
                   <h3 className="font-bold text-lg text-slate-800">{c.title}</h3>
-                  <button onClick={()=>updateData({...data, challenges: data.challenges.filter(x=>x.id!==c.id)})} className="text-red-400"><Icons.Trash/></button>
+                  <button onClick={()=>updateData({...data, challenges: data.challenges.filter(x=>x.id!==c.id)})} className="p-1.5 text-red-400 bg-red-50 rounded-lg"><Icons.Trash/></button>
                 </div>
                 <div className="flex justify-between items-end mb-2">
-                  <span className="font-bold text-purple-700 bg-purple-100 px-3 py-1 rounded-full text-sm">완성된 포도: {bunches}송이 🍇</span>
-                  <span className="text-purple-500 font-bold">{current} / 100</span>
+                  <span className="font-bold text-purple-700 bg-purple-100 px-3 py-1 rounded-full text-xs sm:text-sm">완성된 포도: {bunches}송이 🍇</span>
+                  <span className="text-purple-500 font-bold text-sm">{total % 100} / 100</span>
                 </div>
                 
-                <div className="bg-purple-50 p-3 rounded-xl mb-4">
-                  <div className="grid grid-cols-10 gap-1">
-                    {Array.from({length: 100}).map((_, i) => (
-                      <div key={i} className={`aspect-square rounded-full flex items-center justify-center text-[8px] font-bold ${i < current ? 'bg-purple-500 text-white shadow-sm' : 'bg-white text-slate-300 border border-slate-200'}`}>
-                        {i+1}
-                      </div>
-                    ))}
+                <div className="bg-purple-50 p-2 sm:p-3 rounded-xl">
+                  <div className="grid grid-cols-10 gap-1 sm:gap-1.5">
+                    {grapesHTML}
                   </div>
                 </div>
-
-                <div className="flex gap-2">
-                  <input type="date" value={recordDate} onChange={e=>setRecordDate(e.target.value)} className="flex-1 p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm outline-none"/>
-                  <button onClick={()=>toggleRecord(c.id)} className={`px-4 rounded-lg font-bold text-white transition-colors ${c.records[recordDate] ? 'bg-red-400' : 'bg-purple-600'}`}>
-                    {c.records[recordDate] ? '기록 취소' : '포도알 칠하기'}
-                  </button>
-                </div>
+                <p className="text-[10px] text-slate-400 mt-2 text-center">* 동그라미를 클릭하여 날짜와 메모를 기록하세요.</p>
               </div>
             );
           })}
 
-          {isOpen && (
+          {/* 챌린지 추가 모달 */}
+          {isAddModalOpen && (
             <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
               <div className="bg-white rounded-2xl p-5 w-full max-w-sm">
                 <h3 className="font-bold text-lg mb-4">새 챌린지 추가</h3>
-                <input value={title} onChange={e=>setTitle(e.target.value)} placeholder="목표 이름" className="w-full p-3 bg-slate-50 rounded-lg mb-4 border border-slate-200"/>
+                <input value={newTitle} onChange={e=>setNewTitle(e.target.value)} placeholder="예) 매일 3km 러닝하기" className="w-full p-3 bg-slate-50 rounded-lg mb-4 border border-slate-200"/>
                 <div className="flex gap-2">
-                  <button onClick={()=>setIsOpen(false)} className="flex-1 py-3 bg-slate-100 rounded-xl font-bold">취소</button>
+                  <button onClick={()=>setIsAddModalOpen(false)} className="flex-1 py-3 bg-slate-100 rounded-xl font-bold">취소</button>
                   <button onClick={handleAdd} className="flex-1 py-3 bg-purple-600 text-white rounded-xl font-bold">만들기</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 상세 기록 모달 */}
+          {isRecordModalOpen && (
+            <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl p-5 w-full max-w-sm">
+                <div className="flex justify-between items-center mb-4 border-b border-slate-100 pb-3">
+                  <h3 className="font-bold text-lg text-purple-700">{selectedDay}일차 기록 🍇</h3>
+                  {data.challenges.find(c=>c.id===selectedChallengeId)?.records[selectedDay] && (
+                     <button onClick={handleRemoveRecord} className="text-xs bg-red-50 text-red-500 px-2 py-1.5 rounded-lg font-bold border border-red-100">포도알 지우기</button>
+                  )}
+                </div>
+                <div className="mb-3">
+                   <label className="block text-xs font-bold text-slate-500 mb-1">달성 날짜</label>
+                   <input type="date" value={recordDate} onChange={e=>setRecordDate(e.target.value)} className="w-full p-2.5 bg-slate-50 rounded-lg border border-slate-200 text-sm outline-none"/>
+                </div>
+                <div className="mb-5">
+                   <label className="block text-xs font-bold text-slate-500 mb-1">메모 (선택/포도알에 표시됨)</label>
+                   <textarea value={recordNote} onChange={e=>setRecordNote(e.target.value)} placeholder="예) 5km 뛰었음!" className="w-full p-2.5 bg-slate-50 rounded-lg border border-slate-200 text-sm outline-none h-20 resize-none"></textarea>
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={()=>setIsRecordModalOpen(false)} className="flex-1 py-3 bg-slate-100 rounded-xl font-bold text-slate-600">닫기</button>
+                  <button onClick={handleSaveRecord} className="flex-1 py-3 bg-purple-600 text-white rounded-xl font-bold">포도알 칠하기</button>
                 </div>
               </div>
             </div>
@@ -455,7 +545,7 @@
                 <div className="flex gap-2 mb-4">
                   {['Day ☀️', 'Night 🌙', 'Off 📴'].map(s => {
                     const val = s.split(' ')[0].toLowerCase();
-                    return <button key={s} onClick={()=>setShift(shift === val ? '' : val)} className={`flex-1 py-2 rounded-lg font-bold border ${shift===val ? colors.main+' text-white' : 'bg-white text-slate-500'}`}>{s}</button>;
+                    return <button key={s} onClick={()=>setShift(shift === val ? '' : val)} className={`flex-1 py-2 rounded-lg font-bold border transition-colors ${shift===val ? colors.main+' text-white' : 'bg-white text-slate-500 hover:bg-slate-50'}`}>{s}</button>;
                   })}
                 </div>
               )}
@@ -470,7 +560,7 @@
       };
 
       return (
-        <div className="fade-in">
+        <div className="fade-in pb-10">
           <div className="flex justify-between items-center bg-white p-3 rounded-xl shadow-sm border border-slate-100 mb-4">
             <button onClick={() => setCurrentMonth(new Date(year, month-1, 1))} className="p-2 text-slate-400">&lt;</button>
             <span className={`font-bold text-lg ${colors.text}`}>{year}년 {month+1}월 {title}</span>
@@ -492,7 +582,7 @@
                     <span className="text-[10px] sm:text-xs font-medium mb-0.5">{dayNum}</span>
                     {isGenie && record?.shift && <span className="text-[9px] sm:text-[10px] font-black leading-none mb-0.5">{record.shift==='day'?'☀️':record.shift==='night'?'🌙':'📴'}</span>}
                     {!isGenie && record?.note && <span className="text-[9px] sm:text-[10px] leading-none mb-0.5">🐶</span>}
-                    {record?.note && <div className="text-[8px] sm:text-[9px] text-slate-500 w-full text-center truncate px-0.5 leading-tight">{record.note}</div>}
+                    {record?.note && <div className="text-[8px] sm:text-[9px] text-slate-600 w-full text-center truncate px-0.5 leading-tight">{record.note}</div>}
                   </div>
                 );
               })}
@@ -566,7 +656,7 @@
     };
 
     // ==========================================
-    // 메인 App & 홈 화면 (자동 마이그레이션 포함)
+    // 메인 App & 홈 화면
     // ==========================================
     const App = () => {
       const [currentView, setCurrentView] = useState('home');
@@ -619,7 +709,7 @@
         const blob = new Blob([dataStr], { type: "application/json" });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
-        a.href = url; a.download = `jisoo_diary_backup_${getTodayStr()}.json`;
+        a.href = url; a.download = `JISOO_backup_${getTodayStr()}.json`;
         document.body.appendChild(a); a.click(); document.body.removeChild(a);
         alert("백업 파일이 안전하게 다운로드되었습니다.");
       };
@@ -708,4 +798,3 @@
   </script>
 </body>
 </html>
-```eof
