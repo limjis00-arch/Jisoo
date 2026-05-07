@@ -36,6 +36,7 @@
       date.setDate(date.getDate() + days);
       return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
     };
+    const shortDate = (dStr) => dStr ? dStr.split('-').slice(1).join('/') : '';
 
     // --- 아이콘 ---
     const Icons = {
@@ -193,27 +194,61 @@
       const renderGrid = () => {
         let grid = [];
         for (let h = 0; h < 24; h++) {
-          let row = [];
+          
+          // 가로로 연속된 블록들을 하나로 묶기 (글씨를 덧씌우기 위함)
+          let segments = [];
+          let currentSegment = null;
+          
           for (let m = 0; m < 6; m++) {
             const idx = h * 6 + m;
             const taskId = currentDayRecords[idx];
             const task = data.tasks.find(t => t.id === taskId);
-            row.push(
-              <div 
-                key={idx}
-                onPointerDown={(e) => { e.target.releasePointerCapture(e.pointerId); setIsDragging(true); paintBlock(idx); }}
-                onPointerEnter={() => { if(isDragging) paintBlock(idx); }}
-                className="flex-1 h-6 border-r border-b border-slate-200 last:border-r-0 cursor-pointer transition-colors"
-                style={{ backgroundColor: task ? task.color : 'white' }}
-              ></div>
-            );
+            
+            if (!currentSegment) {
+              currentSegment = { task, span: 1 };
+            } else if (currentSegment.task?.id === task?.id) {
+              currentSegment.span++;
+            } else {
+              segments.push(currentSegment);
+              currentSegment = { task, span: 1 };
+            }
           }
+          if (currentSegment) segments.push(currentSegment);
+
           grid.push(
             <div key={h} className="flex border-l border-slate-200">
-              <div className="w-12 h-6 border-b border-slate-200 bg-slate-50 flex items-center justify-center text-[10px] font-bold text-slate-400">
+              <div className="w-12 h-6 border-b border-slate-200 bg-slate-50 flex items-center justify-center text-[10px] font-bold text-slate-400 shrink-0">
                 {String(h).padStart(2, '0')}
               </div>
-              <div className="flex-1 flex touch-none">{row}</div>
+              <div className="flex-1 relative flex touch-none">
+                
+                {/* 뒤에 깔리는 클릭용 그리드 블록 (투명) */}
+                {[0, 1, 2, 3, 4, 5].map(m => {
+                  const idx = h * 6 + m;
+                  return (
+                    <div 
+                      key={idx}
+                      onPointerDown={(e) => { e.target.releasePointerCapture(e.pointerId); setIsDragging(true); paintBlock(idx); }}
+                      onPointerEnter={() => { if(isDragging) paintBlock(idx); }}
+                      className="flex-1 h-6 border-r border-b border-slate-200 last:border-r-0 cursor-pointer bg-transparent"
+                    ></div>
+                  );
+                })}
+                
+                {/* 위에 덧씌워지는 색상 및 텍스트 레이어 (드래그 방해 안 함) */}
+                <div className="absolute inset-0 flex pointer-events-none">
+                  {segments.map((seg, i) => (
+                    <div 
+                      key={i} 
+                      style={{ flex: seg.span, backgroundColor: seg.task ? seg.task.color : 'transparent' }} 
+                      className={`flex items-center justify-center overflow-hidden border-b border-slate-200 ${seg.task ? 'shadow-inner' : ''}`}
+                    >
+                      {seg.task && <span className="text-[10px] text-white font-bold truncate px-1 drop-shadow-md">{seg.task.name}</span>}
+                    </div>
+                  ))}
+                </div>
+
+              </div>
             </div>
           );
         }
@@ -234,7 +269,7 @@
           </div>
 
           <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100">
-            <h3 className="font-bold mb-3 text-sm">할 일 항목 (색칠할 펜 선택)</h3>
+            <h3 className="font-bold mb-3 text-sm">할 일 항목</h3>
             <div className="flex flex-wrap gap-2 mb-4">
               {data.tasks.map(t => (
                 <div key={t.id} className={`flex items-center gap-1 pl-3 pr-1 py-1 rounded-full text-xs font-bold text-white transition-transform ${activeTask === t.id ? 'scale-110 ring-2 ring-offset-2 ring-blue-400' : 'opacity-80'}`} style={{backgroundColor: t.color}}>
@@ -245,8 +280,8 @@
             </div>
             <div className="flex gap-2">
               <input value={taskName} onChange={e=>setTaskName(e.target.value)} placeholder="새로운 할 일" className="flex-1 p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm" />
-              <input type="color" value={taskColor} onChange={e=>setTaskColor(e.target.value)} className="w-10 h-10 p-0 border-0 rounded-lg" />
-              <button onClick={handleAddTask} className="px-4 bg-blue-600 text-white rounded-lg font-bold text-sm">추가</button>
+              <input type="color" value={taskColor} onChange={e=>setTaskColor(e.target.value)} className="w-16 h-10 p-0 border-0 rounded-lg cursor-pointer" />
+              <button onClick={handleAddTask} className="px-3 py-1.5 bg-blue-600 text-white rounded-lg font-bold text-xs">추가</button>
             </div>
           </div>
 
@@ -259,17 +294,25 @@
     };
 
     // ==========================================
-    // 3. 오늘 루틴 (Routine) + 포도알 달성 현황 분리
+    // 3. 오늘 루틴 (Routine) + 퍼센트 + 세부 항목 편집 + 포도알
     // ==========================================
     const RoutineApp = ({ data, updateData }) => {
       const [date, setDate] = useState(getTodayStr());
       const [showStats, setShowStats] = useState(false);
       
+      const [isModalOpen, setIsModalOpen] = useState(false);
+      const [editCatId, setEditCatId] = useState(null);
+      const [catName, setCatName] = useState('');
+      const [catItems, setCatItems] = useState([]);
+
       const toggleStatus = (itemId, status) => {
         const newHist = { ...data.history };
         if (!newHist[date]) newHist[date] = {};
-        if (newHist[date][itemId] === status) delete newHist[date][itemId];
-        else newHist[date][itemId] = status;
+        if (newHist[date][itemId] === status) {
+          delete newHist[date][itemId];
+        } else {
+          newHist[date][itemId] = status;
+        }
         updateData({ ...data, history: newHist });
       };
 
@@ -290,6 +333,41 @@
         return { bunches: Math.floor(comp/100), current: comp%100 };
       };
 
+      let totalItemsCount = 0;
+      let completedCount = 0;
+      let restedCount = 0;
+      data.categories.forEach(cat => {
+         cat.items.forEach(item => {
+            totalItemsCount++;
+            const st = data.history[date]?.[item.id];
+            if(st === 'completed') completedCount++;
+            if(st === 'rest') restedCount++;
+         });
+      });
+      const activeTotal = totalItemsCount - restedCount;
+      const progressPercent = activeTotal === 0 ? 0 : Math.round((completedCount / activeTotal) * 100);
+
+      const openAddCat = () => { setEditCatId(null); setCatName(''); setCatItems([{id: generateId(), name: ''}]); setIsModalOpen(true); };
+      const openEditCat = (cat) => { setEditCatId(cat.id); setCatName(cat.name); setCatItems(cat.items.map(i=>({...i}))); setIsModalOpen(true); };
+      
+      const saveCat = () => {
+        if(!catName.trim() || catItems.every(i=>!i.name.trim())) return alert("카테고리 제목과 최소 1개의 루틴을 입력해주세요.");
+        const validItems = catItems.filter(i => i.name.trim() !== '');
+        
+        if (editCatId) {
+          updateData({...data, categories: data.categories.map(c => c.id === editCatId ? {...c, name: catName, items: validItems} : c)});
+        } else {
+          updateData({...data, categories: [...data.categories, {id: generateId(), name: catName, items: validItems}]});
+        }
+        setIsModalOpen(false);
+      };
+
+      const deleteCat = (catId) => {
+        if(confirm("이 루틴 그룹을 정말 삭제하시겠습니까? (기존 달성 기록도 삭제됩니다)")) {
+          updateData({...data, categories: data.categories.filter(c => c.id !== catId)});
+        }
+      };
+
       return (
         <div className="fade-in space-y-4 pb-10">
           <div className="flex justify-between items-center bg-white p-3 rounded-xl shadow-sm border border-slate-100">
@@ -298,16 +376,33 @@
             <button onClick={() => setDate(addDays(date, 1))} className="p-2 text-slate-400">&gt;</button>
           </div>
 
-          {data.categories.length === 0 && <p className="text-center text-slate-400 py-10">루틴 데이터가 없습니다.</p>}
+          <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 text-center">
+            <p className="text-sm font-bold text-slate-500 mb-1">오늘의 달성률</p>
+            <div className="text-4xl font-black text-emerald-500 mb-2">{progressPercent}%</div>
+            <div className="w-full bg-slate-100 rounded-full h-3 mb-1">
+              <div className="bg-emerald-500 h-3 rounded-full transition-all duration-500" style={{width: `${progressPercent}%`}}></div>
+            </div>
+            <p className="text-xs text-slate-400">완료 {completedCount} / 대상 {activeTotal} (휴식 {restedCount})</p>
+          </div>
 
-          {/* 루틴 체크 리스트 */}
+          <button onClick={openAddCat} className="w-full py-4 bg-emerald-600 text-white rounded-xl font-bold flex justify-center gap-2 shadow-md"><Icons.Plus/> 새 루틴 추가하기</button>
+
+          {data.categories.length === 0 && <p className="text-center text-slate-400 py-10">설정된 루틴이 없습니다.</p>}
+
           {data.categories.map(cat => (
-            <Accordion key={cat.id} title={cat.name} rightElement={<button onClick={()=>restAll(cat.id)} className="text-xs bg-orange-100 text-orange-600 px-2 py-1 rounded shadow-sm">전체 휴식</button>}>
+            <Accordion key={cat.id} title={cat.name} rightElement={
+              <div className="flex gap-2">
+                <button onClick={() => openEditCat(cat)} className="text-xs bg-indigo-50 text-indigo-600 px-2 py-1 rounded shadow-sm font-bold">수정</button>
+                <button onClick={() => restAll(cat.id)} className="text-xs bg-orange-100 text-orange-600 px-2 py-1 rounded shadow-sm font-bold">전체 휴식</button>
+              </div>
+            }>
               {cat.items.map(item => {
                 const status = data.history[date]?.[item.id];
+                const textStyle = status === 'completed' ? 'text-emerald-600 font-bold' : status === 'rest' ? 'line-through text-slate-400' : 'text-slate-700';
+
                 return (
                   <div key={item.id} className="flex justify-between items-center p-3 mb-2 bg-slate-50 rounded-xl border border-slate-100">
-                    <span className={`font-medium ${status ? 'text-slate-400 line-through' : 'text-slate-700'}`}>{item.name}</span>
+                    <span className={`font-medium ${textStyle}`}>{item.name}</span>
                     <div className="flex gap-1">
                       <button onClick={() => toggleStatus(item.id, 'rest')} className={`p-2 rounded-lg ${status==='rest'?'bg-orange-200 text-orange-700':'bg-white text-slate-400'}`}><Icons.Rest/></button>
                       <button onClick={() => toggleStatus(item.id, 'completed')} className={`p-2 rounded-lg ${status==='completed'?'bg-emerald-200 text-emerald-700':'bg-white text-slate-400'}`}><Icons.Check/></button>
@@ -318,27 +413,24 @@
             </Accordion>
           ))}
 
-          {/* 포도알 달성 현황 토글 버튼 */}
           {data.categories.length > 0 && (
             <button onClick={() => setShowStats(!showStats)} className="w-full py-4 bg-purple-50 text-purple-700 font-bold rounded-xl border border-purple-100 mt-6 shadow-sm flex items-center justify-center gap-2">
               {showStats ? '포도알 달성 현황 숨기기' : '루틴별 포도알 현황 확인 🍇'}
             </button>
           )}
 
-          {/* 포도알 달성 현황 상세창 */}
           {showStats && (
             <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 space-y-4 fade-in">
-              <h3 className="font-bold text-slate-800 border-b border-slate-100 pb-3 mb-3">루틴 누적 달성 현황 (포도알)</h3>
+              <h3 className="font-bold text-slate-800 border-b border-slate-100 pb-3 mb-3">루틴 누적 달성 현황 🍇</h3>
               {data.categories.map(cat => (
-                <div key={cat.id} className="mb-4">
-                  <h4 className="text-sm font-bold text-slate-500 mb-2">{cat.name}</h4>
+                <Accordion key={cat.id} title={cat.name}>
                   {cat.items.map(item => {
                     const stats = getGrapeStats(item.id);
                     return (
                       <div key={item.id} className="mb-3 bg-slate-50 p-3 rounded-xl border border-slate-100">
                         <div className="flex justify-between items-end text-xs mb-2">
                           <span className="font-medium text-slate-700">{item.name}</span>
-                          <span className="font-bold text-purple-600">완성 {stats.bunches}송이 ({stats.current}/100)</span>
+                          <span className="font-bold text-purple-600">완성 {stats.bunches}송이 🍇 ({stats.current}/100)</span>
                         </div>
                         <div className="bg-purple-100 h-2.5 rounded-full overflow-hidden">
                           <div className="bg-purple-500 h-full transition-all" style={{width: `${stats.current}%`}}></div>
@@ -346,8 +438,38 @@
                       </div>
                     );
                   })}
-                </div>
+                </Accordion>
               ))}
+            </div>
+          )}
+
+          {isModalOpen && (
+            <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl p-5 w-full max-w-sm max-h-[90vh] overflow-y-auto">
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="font-bold text-lg">{editCatId ? '루틴 그룹 수정' : '새 루틴 그룹 추가'}</h3>
+                  {editCatId && <button onClick={() => { deleteCat(editCatId); setIsModalOpen(false); }} className="text-sm text-red-500 font-bold bg-red-50 px-2 py-1 rounded">그룹 삭제</button>}
+                </div>
+                
+                <label className="block text-xs font-bold text-slate-500 mb-1">그룹 이름 (예: 아침 루틴)</label>
+                <input value={catName} onChange={e=>setCatName(e.target.value)} placeholder="그룹 이름 입력" className="w-full p-3 bg-slate-50 rounded-lg mb-4 border border-slate-200 outline-none"/>
+                
+                <label className="block text-xs font-bold text-slate-500 mb-2">세부 루틴 항목</label>
+                <div className="space-y-2 mb-4">
+                  {catItems.map((item, idx) => (
+                    <div key={idx} className="flex gap-2">
+                      <input value={item.name} onChange={e=>{const newItems=[...catItems]; newItems[idx].name=e.target.value; setCatItems(newItems);}} placeholder="예) 물 한잔 마시기" className="flex-1 p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm outline-none"/>
+                      <button onClick={()=>setCatItems(catItems.filter((_, i)=>i!==idx))} className="p-2 bg-red-50 text-red-400 rounded-lg"><Icons.Trash/></button>
+                    </div>
+                  ))}
+                  <button onClick={()=>setCatItems([...catItems, {id: generateId(), name: ''}])} className="w-full py-2 bg-slate-100 text-slate-600 rounded-lg text-sm font-bold mt-2">항목 추가 +</button>
+                </div>
+                
+                <div className="flex gap-2">
+                  <button onClick={()=>setIsModalOpen(false)} className="flex-1 py-3 bg-slate-100 rounded-xl font-bold">취소</button>
+                  <button onClick={saveCat} className="flex-1 py-3 bg-emerald-600 text-white rounded-xl font-bold">저장</button>
+                </div>
+              </div>
             </div>
           )}
         </div>
@@ -355,10 +477,11 @@
     };
 
     // ==========================================
-    // 4. 100일 포도알 챌린지 (Grape Challenge) 
+    // 4. 100일 포도알 챌린지 (Grape Challenge)
     // ==========================================
     const GrapeApp = ({ data, updateData }) => {
       const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+      const [editChallengeId, setEditChallengeId] = useState(null);
       const [newTitle, setNewTitle] = useState('');
       
       const [isRecordModalOpen, setIsRecordModalOpen] = useState(false);
@@ -368,17 +491,22 @@
       const [recordDate, setRecordDate] = useState(getTodayStr());
       const [recordNote, setRecordNote] = useState('');
 
-      const handleAdd = () => {
+      const openAdd = () => { setEditChallengeId(null); setNewTitle(''); setIsAddModalOpen(true); };
+      const openEdit = (c) => { setEditChallengeId(c.id); setNewTitle(c.title); setIsAddModalOpen(true); };
+
+      const handleSaveChallenge = () => {
         if(!newTitle.trim()) return;
-        const newC = { id: generateId(), title: newTitle, records: {} }; 
-        updateData({ ...data, challenges: [...data.challenges, newC] });
-        setNewTitle(''); setIsAddModalOpen(false);
+        if(editChallengeId) {
+          updateData({...data, challenges: data.challenges.map(c => c.id === editChallengeId ? {...c, title: newTitle} : c)});
+        } else {
+          updateData({ ...data, challenges: [...data.challenges, { id: generateId(), title: newTitle, records: {} }] });
+        }
+        setIsAddModalOpen(false);
       };
 
       const openRecordModal = (challengeId, dayNum) => {
         setSelectedChallengeId(challengeId);
         setSelectedDay(dayNum);
-        
         const c = data.challenges.find(x => x.id === challengeId);
         const existingRecord = c.records[dayNum];
         
@@ -419,7 +547,7 @@
 
       return (
         <div className="fade-in space-y-4 pb-10">
-          <button onClick={()=>setIsAddModalOpen(true)} className="w-full py-4 bg-purple-600 text-white rounded-xl font-bold flex justify-center gap-2 shadow-md"><Icons.Plus/> 새 포도알 챌린지</button>
+          <button onClick={openAdd} className="w-full py-4 bg-purple-600 text-white rounded-xl font-bold flex justify-center gap-2 shadow-md"><Icons.Plus/> 새 포도알 챌린지</button>
 
           {data.challenges.length === 0 && <p className="text-center text-slate-400 py-10">진행 중인 챌린지가 없습니다.</p>}
 
@@ -427,7 +555,6 @@
             const total = Object.keys(c.records).length;
             const bunches = Math.floor(total/100);
             
-            // 100개 포도알 렌더링
             const grapesHTML = [];
             for (let i = 1; i <= 100; i++) {
               const record = c.records[i];
@@ -436,6 +563,7 @@
                 <button key={i} onClick={() => openRecordModal(c.id, i)} className={`aspect-square rounded-full flex flex-col items-center justify-center transition-transform active:scale-95 shadow-sm overflow-hidden p-0.5 ${isCompleted ? 'bg-gradient-to-br from-purple-500 to-purple-700 text-white' : 'bg-white text-slate-400 border border-slate-200'}`}>
                   <span className="font-bold text-[10px] md:text-xs leading-none">{i}</span>
                   {record?.note && <span className="text-[8px] font-normal opacity-80 truncate w-full text-center mt-0.5">{record.note}</span>}
+                  {record?.date && <span className="text-[7px] font-normal opacity-60 mt-0.5">{shortDate(record.date)}</span>}
                 </button>
               );
             }
@@ -444,14 +572,17 @@
               <div key={c.id} className="bg-white p-4 sm:p-5 rounded-2xl shadow-sm border border-purple-100">
                 <div className="flex justify-between items-center mb-4">
                   <h3 className="font-bold text-lg text-slate-800">{c.title}</h3>
-                  <button onClick={()=>updateData({...data, challenges: data.challenges.filter(x=>x.id!==c.id)})} className="p-1.5 text-red-400 bg-red-50 rounded-lg"><Icons.Trash/></button>
+                  <div className="flex gap-2">
+                    <button onClick={()=>openEdit(c)} className="p-1.5 text-indigo-400 bg-indigo-50 rounded-lg hover:bg-indigo-100"><Icons.Edit/></button>
+                    <button onClick={()=>updateData({...data, challenges: data.challenges.filter(x=>x.id!==c.id)})} className="p-1.5 text-red-400 bg-red-50 rounded-lg hover:bg-red-100"><Icons.Trash/></button>
+                  </div>
                 </div>
                 <div className="flex justify-between items-end mb-2">
                   <span className="font-bold text-purple-700 bg-purple-100 px-3 py-1 rounded-full text-xs sm:text-sm">완성된 포도: {bunches}송이 🍇</span>
                   <span className="text-purple-500 font-bold text-sm">{total % 100} / 100</span>
                 </div>
                 
-                <div className="bg-purple-50 p-2 sm:p-3 rounded-xl">
+                <div className="bg-purple-50 p-2 sm:p-3 rounded-xl mb-2">
                   <div className="grid grid-cols-10 gap-1 sm:gap-1.5">
                     {grapesHTML}
                   </div>
@@ -461,15 +592,15 @@
             );
           })}
 
-          {/* 챌린지 추가 모달 */}
+          {/* 챌린지 추가/수정 모달 */}
           {isAddModalOpen && (
             <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
               <div className="bg-white rounded-2xl p-5 w-full max-w-sm">
-                <h3 className="font-bold text-lg mb-4">새 챌린지 추가</h3>
+                <h3 className="font-bold text-lg mb-4">{editChallengeId ? '챌린지 제목 수정' : '새 챌린지 추가'}</h3>
                 <input value={newTitle} onChange={e=>setNewTitle(e.target.value)} placeholder="예) 매일 3km 러닝하기" className="w-full p-3 bg-slate-50 rounded-lg mb-4 border border-slate-200"/>
                 <div className="flex gap-2">
                   <button onClick={()=>setIsAddModalOpen(false)} className="flex-1 py-3 bg-slate-100 rounded-xl font-bold">취소</button>
-                  <button onClick={handleAdd} className="flex-1 py-3 bg-purple-600 text-white rounded-xl font-bold">만들기</button>
+                  <button onClick={handleSaveChallenge} className="flex-1 py-3 bg-purple-600 text-white rounded-xl font-bold">저장</button>
                 </div>
               </div>
             </div>
@@ -490,7 +621,7 @@
                    <input type="date" value={recordDate} onChange={e=>setRecordDate(e.target.value)} className="w-full p-2.5 bg-slate-50 rounded-lg border border-slate-200 text-sm outline-none"/>
                 </div>
                 <div className="mb-5">
-                   <label className="block text-xs font-bold text-slate-500 mb-1">메모 (선택/포도알에 표시됨)</label>
+                   <label className="block text-xs font-bold text-slate-500 mb-1">메모 (포도알에 작게 표시됨)</label>
                    <textarea value={recordNote} onChange={e=>setRecordNote(e.target.value)} placeholder="예) 5km 뛰었음!" className="w-full p-2.5 bg-slate-50 rounded-lg border border-slate-200 text-sm outline-none h-20 resize-none"></textarea>
                 </div>
                 <div className="flex gap-2">
@@ -656,7 +787,7 @@
     };
 
     // ==========================================
-    // 메인 App & 홈 화면
+    // 메인 App & 홈 화면 (자동 마이그레이션 포함)
     // ==========================================
     const App = () => {
       const [currentView, setCurrentView] = useState('home');
@@ -683,7 +814,22 @@
           if (oldGrape) {
             const parsed = JSON.parse(oldGrape);
             if (Array.isArray(parsed)) {
-              baseData.grape.challenges = parsed;
+              baseData.grape.challenges = parsed.map(c => {
+                let hasDateKeys = false;
+                const newRecords = {};
+                let dayCounter = 1;
+                
+                Object.keys(c.records).sort().forEach(k => {
+                  if (k.includes('-')) {
+                    hasDateKeys = true;
+                    newRecords[dayCounter] = { completed: true, note: '', date: k, ...(typeof c.records[k] === 'object' ? c.records[k] : {}) };
+                    dayCounter++;
+                  } else {
+                    newRecords[k] = c.records[k];
+                  }
+                });
+                return { ...c, records: hasDateKeys ? newRecords : c.records };
+              });
               isMigrated = true;
             }
           }
