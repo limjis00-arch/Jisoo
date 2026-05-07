@@ -37,7 +37,6 @@
       date.setDate(date.getDate() + days);
       return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
     };
-    const shortDate = (dStr) => dStr ? dStr.split('-').slice(1).join('/') : '';
 
     // --- 아이콘 ---
     const Icons = {
@@ -54,17 +53,14 @@
       ChevronUp: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 15l7-7 7 7"/></svg>
     };
 
-    // --- 전역 초기 데이터 ---
     const defaultData = {
       manual: { items: [], tags: [] },
-      planner: { events: {} }, // 완전히 새로운 events 데이터 구조 사용!
       routine: { categories: [], history: {} },
       grape: { challenges: [] },
       genie: { records: {} },
       longie: { records: {} }
     };
 
-    // --- 아코디언 컴포넌트 ---
     const Accordion = ({ title, children, rightElement }) => {
       const [isOpen, setIsOpen] = useState(true);
       return (
@@ -83,9 +79,7 @@
       );
     };
 
-    // ==========================================
     // 1. 나 사용법 (Manual)
-    // ==========================================
     const ManualApp = ({ data, updateData }) => {
       const [isOpen, setIsOpen] = useState(false);
       const [editId, setEditId] = useState(null);
@@ -139,19 +133,19 @@
 
           {isOpen && (
             <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-              <div className="bg-white rounded-2xl p-5 w-full max-w-sm max-h-[90vh] overflow-y-auto">
+              <div className="bg-white rounded-2xl p-5 w-full max-w-sm max-h-[90vh] overflow-y-auto text-slate-800">
                 <h3 className="font-bold text-lg mb-4">{editId ? '수정하기' : '새 항목 추가'}</h3>
-                <input placeholder="대제목 (예: 돈을 쓸 때 원칙)" value={title} onChange={e=>setTitle(e.target.value)} className="w-full p-3 bg-slate-50 rounded-lg mb-3 border border-slate-200"/>
-                <textarea placeholder="상세 내용" value={content} onChange={e=>setContent(e.target.value)} className="w-full p-3 bg-slate-50 rounded-lg mb-3 h-32 border border-slate-200"></textarea>
+                <input placeholder="대제목 (예: 돈을 쓸 때 원칙)" value={title} onChange={e=>setTitle(e.target.value)} className="w-full p-3 bg-slate-50 rounded-lg mb-3 border border-slate-200 outline-none"/>
+                <textarea placeholder="상세 내용" value={content} onChange={e=>setContent(e.target.value)} className="w-full p-3 bg-slate-50 rounded-lg mb-3 h-32 border border-slate-200 outline-none"></textarea>
                 
                 <div className="flex gap-2 mb-2 items-center">
-                  <input placeholder="새 태그 직접 입력" value={tagInput} onChange={e=>setTagInput(e.target.value)} onKeyDown={e=>{if(e.key==='Enter' && tagInput) { setSelectedTags([...new Set([...selectedTags, tagInput])]); setTagInput(''); }}} className="flex-1 p-2.5 bg-slate-50 rounded-lg border border-slate-200 text-sm"/>
+                  <input placeholder="새 태그 직접 입력" value={tagInput} onChange={e=>setTagInput(e.target.value)} onKeyDown={e=>{if(e.key==='Enter' && tagInput) { setSelectedTags([...new Set([...selectedTags, tagInput])]); setTagInput(''); }}} className="flex-1 p-2.5 bg-slate-50 rounded-lg border border-slate-200 text-sm outline-none"/>
                   <button onClick={()=>{if(tagInput) { setSelectedTags([...new Set([...selectedTags, tagInput])]); setTagInput(''); }}} className="px-3 py-2 bg-slate-200 text-slate-700 rounded-lg text-sm font-bold hover:bg-slate-300">추가</button>
                 </div>
 
                 {availableTags.length > 0 && (
                   <div className="mb-4">
-                    <span className="text-xs font-bold text-slate-500 block mb-1">기존 태그 간편 선택</span>
+                    <span className="text-xs font-bold text-slate-500 block mb-1 text-left">기존 태그 간편 선택</span>
                     <div className="flex flex-wrap gap-1">
                       {availableTags.map(t => (
                         <span key={t} onClick={() => setSelectedTags([...selectedTags, t])} className="bg-slate-100 text-slate-600 px-2 py-1.5 rounded-lg text-xs font-medium cursor-pointer hover:bg-indigo-50 hover:text-indigo-600 transition-colors">
@@ -174,313 +168,10 @@
       );
     };
 
-    // ==========================================
-    // 2. 데일리 플래너 (10 Min Planner) - 완벽한 캔버스 & 시간 블록 방식
-    // ==========================================
-    const PlannerApp = ({ data, updateData }) => {
-      const [date, setDate] = useState(getTodayStr());
-      
-      // UX 모드: 'scroll' (이동), 'draw' (그리기), 'erase' (지우기)
-      const [interactionMode, setInteractionMode] = useState('scroll');
-      
-      // 캔버스 도구 상태
-      const [brushText, setBrushText] = useState('');
-      const [brushColor, setBrushColor] = useState('#93c5fd');
-      
-      // 드래그 임시 상태
-      const [dragBlock, setDragBlock] = useState(null); // { start, current }
-      
-      // 개별 이벤트 수정 팝업 상태
-      const [editEvent, setEditEvent] = useState(null); 
-      
-      const containerRef = useRef(null);
-      const isDraggingRef = useRef(false);
-
-      const pastelPalette = [
-        '#fca5a5', '#fdba74', '#fcd34d', '#86efac', 
-        '#93c5fd', '#c4b5fd', '#f472b6', '#cbd5e1'
-      ];
-
-      // 데이터가 없을 때를 대비한 안전망
-      const currentEvents = (data.events && data.events[date]) ? data.events[date] : [];
-
-      // 10분 = 12px (1시간 = 72px)
-      const SLOT_HEIGHT = 12;
-      const TOTAL_SLOTS = 144; // 24 * 6
-
-      // Y좌표를 슬롯 인덱스(0~143)로 변환
-      const getSlotIndex = (clientY) => {
-        if (!containerRef.current) return null;
-        const rect = containerRef.current.getBoundingClientRect();
-        const y = clientY - rect.top;
-        let idx = Math.floor(y / SLOT_HEIGHT);
-        if (idx < 0) idx = 0;
-        if (idx >= TOTAL_SLOTS) idx = TOTAL_SLOTS - 1;
-        return idx;
-      };
-
-      const handlePointerDown = (e) => {
-        if (interactionMode === 'scroll') return;
-        
-        // 브러시 텍스트가 비어있고 그리기 모드일 때 경고
-        if (interactionMode === 'draw' && !brushText.trim()) {
-          alert('상단에 그릴 메모(이름)를 먼저 입력해주세요!');
-          return;
-        }
-
-        if (e.target.releasePointerCapture && e.pointerId) e.target.releasePointerCapture(e.pointerId);
-        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-        const idx = getSlotIndex(clientY);
-        
-        if (idx !== null) {
-          isDraggingRef.current = true;
-          setDragBlock({ start: idx, current: idx });
-        }
-      };
-
-      const handlePointerMove = (e) => {
-        if (!isDraggingRef.current || interactionMode === 'scroll' || !dragBlock) return;
-        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-        const idx = getSlotIndex(clientY);
-        
-        if (idx !== null) {
-          setDragBlock(prev => ({ ...prev, current: idx }));
-        }
-      };
-
-      const handlePointerUp = () => {
-        if (!isDraggingRef.current || !dragBlock) return;
-        isDraggingRef.current = false;
-
-        const startIdx = Math.min(dragBlock.start, dragBlock.current);
-        const endIdx = Math.max(dragBlock.start, dragBlock.current);
-        
-        setDragBlock(null);
-
-        // 오버랩 및 트리밍(지우개 스플릿) 로직!
-        let updatedEvents = [];
-        
-        for (let ev of currentEvents) {
-          if (ev.end < startIdx || ev.start > endIdx) {
-            // 영역 밖이면 그대로 보존
-            updatedEvents.push(ev);
-          } else {
-            // 겹치는 영역이 발생하면 쪼개거나 깎아냅니다.
-            if (ev.start < startIdx) {
-              updatedEvents.push({ ...ev, id: generateId(), end: startIdx - 1 });
-            }
-            if (ev.end > endIdx) {
-              updatedEvents.push({ ...ev, id: generateId(), start: endIdx + 1 });
-            }
-          }
-        }
-
-        // 그리기 모드일 경우 새로운 블록을 추가
-        if (interactionMode === 'draw') {
-          updatedEvents.push({
-            id: generateId(),
-            start: startIdx,
-            end: endIdx,
-            color: brushColor,
-            text: brushText
-          });
-        }
-
-        // 시간순 정렬
-        updatedEvents.sort((a, b) => a.start - b.start);
-
-        updateData({
-          ...data,
-          events: { ...(data.events || {}), [date]: updatedEvents }
-        });
-      };
-
-      // 블록 클릭 시 편집 팝업
-      const handleEventClick = (e, ev) => {
-        if (interactionMode !== 'scroll') return; // 스크롤 모드에서만 클릭 편집 가능
-        e.stopPropagation();
-        setEditEvent({ ...ev });
-      };
-
-      const handleSaveEdit = () => {
-        if (!editEvent.text.trim()) return alert("메모를 입력해주세요!");
-        const updatedEvents = currentEvents.map(ev => ev.id === editEvent.id ? editEvent : ev);
-        updateData({ ...data, events: { ...(data.events || {}), [date]: updatedEvents } });
-        setEditEvent(null);
-      };
-
-      const handleDeleteEdit = () => {
-        const updatedEvents = currentEvents.filter(ev => ev.id !== editEvent.id);
-        updateData({ ...data, events: { ...(data.events || {}), [date]: updatedEvents } });
-        setEditEvent(null);
-      };
-
-      return (
-        <div className="fade-in space-y-4 pb-10">
-          
-          {/* 상단 날짜 컨트롤러 */}
-          <div className="flex justify-between items-center bg-white p-3 rounded-xl shadow-sm border border-slate-100">
-            <button onClick={() => setDate(addDays(date, -1))} className="p-2 text-slate-400 hover:bg-slate-50 rounded-lg transition-colors">&lt;</button>
-            <span className="font-bold text-lg text-slate-800">{date} 플래너</span>
-            <button onClick={() => setDate(addDays(date, 1))} className="p-2 text-slate-400 hover:bg-slate-50 rounded-lg transition-colors">&gt;</button>
-          </div>
-
-          {/* 캔버스 컨트롤 패널 (텐미닛 스타일) */}
-          <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 sticky top-[72px] z-30 shadow-md">
-            {/* 토글 버튼 */}
-            <div className="flex bg-slate-100 p-1 rounded-xl mb-4">
-              <button 
-                onClick={() => setInteractionMode('scroll')}
-                className={`flex-1 py-2.5 rounded-lg font-bold text-sm transition-all ${interactionMode === 'scroll' ? 'bg-white shadow-sm text-slate-800' : 'text-slate-400'}`}
-              >👆 이동 / 수정</button>
-              <button 
-                onClick={() => setInteractionMode('draw')}
-                className={`flex-1 py-2.5 rounded-lg font-bold text-sm transition-all ${interactionMode === 'draw' ? 'bg-white shadow-sm text-blue-600' : 'text-slate-400'}`}
-              >✏️ 그리기</button>
-              <button 
-                onClick={() => setInteractionMode('erase')}
-                className={`flex-1 py-2.5 rounded-lg font-bold text-sm transition-all ${interactionMode === 'erase' ? 'bg-white shadow-sm text-red-500' : 'text-slate-400'}`}
-              >🧽 지우기</button>
-            </div>
-
-            {/* 그리기 모드일 때만 보이는 브러시 설정 */}
-            {interactionMode === 'draw' && (
-              <div className="fade-in border-t border-slate-100 pt-3">
-                <span className="text-[11px] font-bold text-slate-500 mb-2 block">펜 색상 선택</span>
-                <div className="flex flex-wrap gap-2 mb-3">
-                  {pastelPalette.map(c => (
-                    <button key={c} onClick={() => setBrushColor(c)} className={`w-8 h-8 rounded-full border-2 transition-transform ${brushColor === c ? 'border-slate-800 scale-110 shadow-sm' : 'border-transparent'}`} style={{backgroundColor: c}}></button>
-                  ))}
-                </div>
-                <div className="flex gap-2 items-center">
-                  <input value={brushText} onChange={e=>setBrushText(e.target.value)} placeholder="메모할 일정을 적어주세요!" className="flex-1 p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm font-bold outline-none text-slate-700" />
-                </div>
-                <p className="text-[10px] text-blue-500 mt-2 text-center">📝 메모와 색상을 정했다면, 아래 시간표를 손가락으로 슥 문지르세요!</p>
-              </div>
-            )}
-            {interactionMode === 'scroll' && (
-              <p className="text-[11px] text-slate-500 text-center font-medium">화면을 스크롤하거나, 이미 그려진 블록을 눌러서 수정하세요.</p>
-            )}
-            {interactionMode === 'erase' && (
-              <p className="text-[11px] text-red-400 text-center font-bold animate-pulse">시간표 위를 문지르면 그만큼 블록이 지워집니다.</p>
-            )}
-          </div>
-
-          {/* 타임라인 캔버스 (세로형) */}
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-            <div className="flex relative">
-              {/* 왼쪽 시간 축 (00 ~ 23) */}
-              <div className="w-12 sm:w-14 flex-shrink-0 border-r border-slate-100 bg-slate-50/50">
-                {Array.from({length: 24}).map((_, h) => (
-                  <div key={h} className="flex justify-center items-start text-[10px] font-bold text-slate-400 -mt-1.5" style={{ height: `${SLOT_HEIGHT * 6}px` }}>
-                    {String(h).padStart(2, '0')}:00
-                  </div>
-                ))}
-              </div>
-              
-              {/* 오른쪽 그리기 영역 */}
-              <div 
-                ref={containerRef}
-                className={`flex-1 relative bg-white ${interactionMode !== 'scroll' ? 'touch-none' : ''}`}
-                style={{ height: `${TOTAL_SLOTS * SLOT_HEIGHT}px` }}
-                onPointerDown={handlePointerDown}
-                onPointerMove={handlePointerMove}
-                onPointerUp={handlePointerUp}
-                onTouchMove={handlePointerMove}
-                onTouchEnd={handlePointerUp}
-                onPointerCancel={handlePointerUp}
-                onMouseLeave={handlePointerUp}
-              >
-                {/* 1시간 단위 실선 */}
-                {Array.from({length: 24}).map((_, h) => (
-                  <div key={h} className="absolute w-full border-t border-slate-200" style={{ top: `${h * 6 * SLOT_HEIGHT}px` }}></div>
-                ))}
-                {/* 10분 단위 점선 */}
-                {Array.from({length: 144}).map((_, m) => (
-                  m % 6 !== 0 && <div key={m} className="absolute w-full border-t border-slate-100 border-dashed" style={{ top: `${m * SLOT_HEIGHT}px` }}></div>
-                ))}
-
-                {/* 확정된 이벤트 블록들 */}
-                {currentEvents.map(ev => (
-                  <div 
-                    key={ev.id}
-                    onClick={(e) => handleEventClick(e, ev)}
-                    className="absolute rounded-md shadow-sm border border-black/5 overflow-hidden transition-transform active:scale-[0.98]"
-                    style={{
-                      top: `${ev.start * SLOT_HEIGHT}px`,
-                      height: `${(ev.end - ev.start + 1) * SLOT_HEIGHT}px`,
-                      left: '4px',
-                      right: '4px',
-                      backgroundColor: ev.color,
-                      cursor: interactionMode === 'scroll' ? 'pointer' : 'default'
-                    }}
-                  >
-                    <div className="sticky top-0 p-1 sm:p-1.5">
-                      <span className="text-[11px] sm:text-xs font-black text-slate-800 leading-tight block break-words drop-shadow-sm">{ev.text}</span>
-                    </div>
-                  </div>
-                ))}
-
-                {/* 드래그 중인 임시 렌더링 블록 */}
-                {dragBlock && (
-                  <div 
-                    className={`absolute rounded-md opacity-80 border-2 border-dashed ${interactionMode === 'erase' ? 'bg-red-200 border-red-500' : 'border-black/20'}`}
-                    style={{
-                      top: `${Math.min(dragBlock.start, dragBlock.current) * SLOT_HEIGHT}px`,
-                      height: `${(Math.abs(dragBlock.current - dragBlock.start) + 1) * SLOT_HEIGHT}px`,
-                      left: '4px',
-                      right: '4px',
-                      backgroundColor: interactionMode === 'draw' ? brushColor : undefined,
-                      zIndex: 20
-                    }}
-                  >
-                    {interactionMode === 'draw' && brushText && (
-                      <div className="p-1 sm:p-1.5">
-                        <span className="text-[11px] sm:text-xs font-black text-slate-800 opacity-50">{brushText}</span>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* 블록 편집 모달 */}
-          {editEvent && (
-            <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 fade-in">
-              <div className="bg-white rounded-3xl p-5 w-full max-w-xs shadow-2xl">
-                <h3 className="font-bold text-lg mb-4 text-slate-800">일정 수정</h3>
-                
-                <label className="block text-xs font-bold text-slate-500 mb-1">메모 수정</label>
-                <input value={editEvent.text} onChange={e=>setEditEvent({...editEvent, text: e.target.value})} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl mb-4 font-bold outline-none"/>
-                
-                <label className="block text-xs font-bold text-slate-500 mb-1">색상 변경</label>
-                <div className="flex flex-wrap gap-2 mb-6">
-                  {pastelPalette.map(c => (
-                    <button key={c} onClick={() => setEditEvent({...editEvent, color: c})} className={`w-8 h-8 rounded-full border-2 transition-transform ${editEvent.color === c ? 'border-slate-800 scale-110 shadow-md' : 'border-transparent'}`} style={{backgroundColor: c}}></button>
-                  ))}
-                </div>
-
-                <div className="flex gap-2">
-                  <button onClick={handleDeleteEdit} className="px-4 py-3 bg-red-50 text-red-500 rounded-xl font-bold border border-red-100">삭제</button>
-                  <button onClick={()=>setEditEvent(null)} className="flex-1 py-3 bg-slate-100 rounded-xl font-bold text-slate-600">취소</button>
-                  <button onClick={handleSaveEdit} className="flex-1 py-3 bg-blue-600 text-white rounded-xl font-bold">저장</button>
-                </div>
-              </div>
-            </div>
-          )}
-
-        </div>
-      );
-    };
-
-    // ==========================================
-    // 3. 오늘 루틴 (Routine)
-    // ==========================================
+    // 2. 오늘 루틴 (Routine)
     const RoutineApp = ({ data, updateData }) => {
       const [date, setDate] = useState(getTodayStr());
       const [showStats, setShowStats] = useState(false);
-      
       const [isModalOpen, setIsModalOpen] = useState(false);
       const [editCatId, setEditCatId] = useState(null);
       const [catName, setCatName] = useState('');
@@ -489,11 +180,8 @@
       const toggleStatus = (itemId, status) => {
         const newHist = { ...data.history };
         if (!newHist[date]) newHist[date] = {};
-        if (newHist[date][itemId] === status) {
-          delete newHist[date][itemId];
-        } else {
-          newHist[date][itemId] = status;
-        }
+        if (newHist[date][itemId] === status) delete newHist[date][itemId];
+        else newHist[date][itemId] = status;
         updateData({ ...data, history: newHist });
       };
 
@@ -506,33 +194,15 @@
         updateData({ ...data, history: newHist });
       };
 
-      const getGrapeStats = (itemId) => {
-        let comp = 0;
-        Object.values(data.history).forEach(day => {
-          if (day[itemId] === 'completed') comp++;
-        });
-        return { bunches: Math.floor(comp/100), current: comp%100 };
-      };
-
       const openAddCat = () => { setEditCatId(null); setCatName(''); setCatItems([{id: generateId(), name: ''}]); setIsModalOpen(true); };
       const openEditCat = (cat) => { setEditCatId(cat.id); setCatName(cat.name); setCatItems(cat.items.map(i=>({...i}))); setIsModalOpen(true); };
       
       const saveCat = () => {
-        if(!catName.trim() || catItems.every(i=>!i.name.trim())) return alert("카테고리 제목과 최소 1개의 루틴을 입력해주세요.");
+        if(!catName.trim() || catItems.every(i=>!i.name.trim())) return alert("제목과 내용을 입력해주세요.");
         const validItems = catItems.filter(i => i.name.trim() !== '');
-        
-        if (editCatId) {
-          updateData({...data, categories: data.categories.map(c => c.id === editCatId ? {...c, name: catName, items: validItems} : c)});
-        } else {
-          updateData({...data, categories: [...data.categories, {id: generateId(), name: catName, items: validItems}]});
-        }
+        if (editCatId) updateData({...data, categories: data.categories.map(c => c.id === editCatId ? {...c, name: catName, items: validItems} : c)});
+        else updateData({...data, categories: [...data.categories, {id: generateId(), name: catName, items: validItems}]});
         setIsModalOpen(false);
-      };
-
-      const deleteCat = (catId) => {
-        if(confirm("이 루틴 그룹을 정말 삭제하시겠습니까? (기존 달성 기록도 삭제됩니다)")) {
-          updateData({...data, categories: data.categories.filter(c => c.id !== catId)});
-        }
       };
 
       return (
@@ -545,106 +215,42 @@
 
           <button onClick={openAddCat} className="w-full py-4 bg-emerald-600 text-white rounded-xl font-bold flex justify-center gap-2 shadow-md"><Icons.Plus/> 새 루틴 추가하기</button>
 
-          {data.categories.length === 0 && <p className="text-center text-slate-400 py-10">설정된 루틴이 없습니다.</p>}
-
-          {data.categories.map(cat => {
-            let catTotal = cat.items.length;
-            let catDone = 0;
-            let catRest = 0;
-            cat.items.forEach(item => {
-               const st = data.history[date]?.[item.id];
-               if(st === 'completed') catDone++;
-               if(st === 'rest') catRest++;
-            });
-            const catActiveTotal = catTotal - catRest;
-            const catRate = catActiveTotal === 0 ? (catTotal === 0 ? 0 : 100) : Math.round((catDone / catActiveTotal) * 100);
-
-            return (
-              <Accordion 
-                key={cat.id} 
-                title={
-                  <div className="flex items-center gap-2">
-                    {cat.name} 
-                    <span className="text-xs font-black text-emerald-500 bg-emerald-50 px-2 py-0.5 rounded-full">{catRate}%</span>
-                  </div>
-                } 
-                rightElement={
-                  <div className="flex gap-2">
-                    <button onClick={() => openEditCat(cat)} className="text-xs bg-indigo-50 text-indigo-600 px-2 py-1 rounded shadow-sm font-bold">수정</button>
-                    <button onClick={() => restAll(cat.id)} className="text-xs bg-orange-100 text-orange-600 px-2 py-1 rounded shadow-sm font-bold">전체 휴식</button>
-                  </div>
-                }
-              >
-                {cat.items.map(item => {
-                  const status = data.history[date]?.[item.id];
-                  const textStyle = status === 'completed' ? 'text-emerald-600 font-bold' : status === 'rest' ? 'line-through text-slate-400' : 'text-slate-700';
-
-                  return (
-                    <div key={item.id} className="flex justify-between items-center p-3 mb-2 bg-slate-50 rounded-xl border border-slate-100">
-                      <span className={`font-medium ${textStyle}`}>{item.name}</span>
-                      <div className="flex gap-1">
-                        <button onClick={() => toggleStatus(item.id, 'rest')} className={`p-2 rounded-lg ${status==='rest'?'bg-orange-200 text-orange-700':'bg-white text-slate-400'}`}><Icons.Rest/></button>
-                        <button onClick={() => toggleStatus(item.id, 'completed')} className={`p-2 rounded-lg ${status==='completed'?'bg-emerald-200 text-emerald-700':'bg-white text-slate-400'}`}><Icons.Check/></button>
-                      </div>
+          {data.categories.map(cat => (
+            <Accordion key={cat.id} title={cat.name} rightElement={
+              <div className="flex gap-2">
+                <button onClick={() => openEditCat(cat)} className="text-xs bg-indigo-50 text-indigo-600 px-2 py-1 rounded shadow-sm font-bold">수정</button>
+                <button onClick={() => restAll(cat.id)} className="text-xs bg-orange-100 text-orange-600 px-2 py-1 rounded shadow-sm font-bold">전체 휴식</button>
+              </div>
+            }>
+              {cat.items.map(item => {
+                const status = data.history[date]?.[item.id];
+                return (
+                  <div key={item.id} className="flex justify-between items-center p-3 mb-2 bg-slate-50 rounded-xl border border-slate-100">
+                    <span className={`font-medium ${status==='completed'?'text-emerald-600 font-bold':status==='rest'?'line-through text-slate-400':'text-slate-700'}`}>{item.name}</span>
+                    <div className="flex gap-1">
+                      <button onClick={() => toggleStatus(item.id, 'rest')} className={`p-2 rounded-lg ${status==='rest'?'bg-orange-200 text-orange-700':'bg-white text-slate-400'}`}><Icons.Rest/></button>
+                      <button onClick={() => toggleStatus(item.id, 'completed')} className={`p-2 rounded-lg ${status==='completed'?'bg-emerald-200 text-emerald-700':'bg-white text-slate-400'}`}><Icons.Check/></button>
                     </div>
-                  );
-                })}
-              </Accordion>
-            );
-          })}
-
-          {data.categories.length > 0 && (
-            <button onClick={() => setShowStats(!showStats)} className="w-full py-4 bg-purple-50 text-purple-700 font-bold rounded-xl border border-purple-100 mt-6 shadow-sm flex items-center justify-center gap-2">
-              {showStats ? '포도알 달성 현황 숨기기' : '루틴별 포도알 현황 확인 🍇'}
-            </button>
-          )}
-
-          {showStats && (
-            <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 space-y-4 fade-in">
-              <h3 className="font-bold text-slate-800 border-b border-slate-100 pb-3 mb-3">루틴 누적 달성 현황 🍇</h3>
-              {data.categories.map(cat => (
-                <Accordion key={cat.id} title={cat.name}>
-                  {cat.items.map(item => {
-                    const stats = getGrapeStats(item.id);
-                    return (
-                      <div key={item.id} className="mb-3 bg-slate-50 p-3 rounded-xl border border-slate-100">
-                        <div className="flex justify-between items-end text-xs mb-2">
-                          <span className="font-medium text-slate-700">{item.name}</span>
-                          <span className="font-bold text-purple-600">완성 {stats.bunches}송이 🍇 ({stats.current}/100)</span>
-                        </div>
-                        <div className="bg-purple-100 h-2.5 rounded-full overflow-hidden">
-                          <div className="bg-purple-500 h-full transition-all" style={{width: `${stats.current}%`}}></div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </Accordion>
-              ))}
-            </div>
-          )}
+                  </div>
+                );
+              })}
+            </Accordion>
+          ))}
 
           {isModalOpen && (
             <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-              <div className="bg-white rounded-2xl p-5 w-full max-w-sm max-h-[90vh] overflow-y-auto">
-                <div className="flex justify-between items-center mb-4">
-                  <h3 className="font-bold text-lg">{editCatId ? '루틴 그룹 수정' : '새 루틴 그룹 추가'}</h3>
-                  {editCatId && <button onClick={() => { deleteCat(editCatId); setIsModalOpen(false); }} className="text-sm text-red-500 font-bold bg-red-50 px-2 py-1 rounded">그룹 삭제</button>}
-                </div>
-                
-                <label className="block text-xs font-bold text-slate-500 mb-1">그룹 이름 (예: 아침 루틴)</label>
-                <input value={catName} onChange={e=>setCatName(e.target.value)} placeholder="그룹 이름 입력" className="w-full p-3 bg-slate-50 rounded-lg mb-4 border border-slate-200 outline-none"/>
-                
-                <label className="block text-xs font-bold text-slate-500 mb-2">세부 루틴 항목</label>
+              <div className="bg-white rounded-2xl p-5 w-full max-w-sm max-h-[90vh] overflow-y-auto text-slate-800">
+                <h3 className="font-bold text-lg mb-4">{editCatId ? '수정' : '추가'}</h3>
+                <input value={catName} onChange={e=>setCatName(e.target.value)} placeholder="그룹 이름" className="w-full p-3 bg-slate-50 rounded-lg mb-4 border border-slate-200 outline-none"/>
                 <div className="space-y-2 mb-4">
                   {catItems.map((item, idx) => (
                     <div key={idx} className="flex gap-2">
-                      <input value={item.name} onChange={e=>{const newItems=[...catItems]; newItems[idx].name=e.target.value; setCatItems(newItems);}} placeholder="예) 물 한잔 마시기" className="flex-1 p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm outline-none"/>
-                      <button onClick={()=>setCatItems(catItems.filter((_, i)=>i!==idx))} className="p-2 bg-red-50 text-red-400 rounded-lg shrink-0"><Icons.Trash/></button>
+                      <input value={item.name} onChange={e=>{const n=[...catItems]; n[idx].name=e.target.value; setCatItems(n);}} placeholder="내용" className="flex-1 p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm outline-none"/>
+                      <button onClick={()=>setCatItems(catItems.filter((_, i)=>i!==idx))} className="p-2 bg-red-50 text-red-400 rounded-lg"><Icons.Trash/></button>
                     </div>
                   ))}
-                  <button onClick={()=>setCatItems([...catItems, {id: generateId(), name: ''}])} className="w-full py-2 bg-slate-100 text-slate-600 rounded-lg text-sm font-bold mt-2">항목 추가 +</button>
+                  <button onClick={()=>setCatItems([...catItems, {id: generateId(), name: ''}])} className="w-full py-2 bg-slate-100 rounded-lg text-sm font-bold mt-2">항목 추가 +</button>
                 </div>
-                
                 <div className="flex gap-2">
                   <button onClick={()=>setIsModalOpen(false)} className="flex-1 py-3 bg-slate-100 rounded-xl font-bold">취소</button>
                   <button onClick={saveCat} className="flex-1 py-3 bg-emerald-600 text-white rounded-xl font-bold">저장</button>
@@ -656,157 +262,71 @@
       );
     };
 
-    // ==========================================
-    // 4. 100일 포도알 챌린지 (Grape Challenge)
-    // ==========================================
+    // 3. 100일 포도알 챌린지 (Grape Challenge)
     const GrapeApp = ({ data, updateData }) => {
       const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-      const [editChallengeId, setEditChallengeId] = useState(null);
-      const [newTitle, setNewTitle] = useState('');
-      
+      const [editId, setEditId] = useState(null);
+      const [title, setTitle] = useState('');
       const [isRecordModalOpen, setIsRecordModalOpen] = useState(false);
-      const [selectedChallengeId, setSelectedChallengeId] = useState(null);
-      const [selectedDay, setSelectedDay] = useState(null);
-      
-      const [recordDate, setRecordDate] = useState(getTodayStr());
-      const [recordNote, setRecordNote] = useState('');
+      const [selChallenge, setSelChallenge] = useState(null);
+      const [selDay, setSelDay] = useState(null);
+      const [recDate, setRecDate] = useState(getTodayStr());
+      const [recNote, setRecNote] = useState('');
 
-      const openAdd = () => { setEditChallengeId(null); setNewTitle(''); setIsAddModalOpen(true); };
-      const openEdit = (c) => { setEditChallengeId(c.id); setNewTitle(c.title); setIsAddModalOpen(true); };
-
-      const handleSaveChallenge = () => {
-        if(!newTitle.trim()) return;
-        if(editChallengeId) {
-          updateData({...data, challenges: data.challenges.map(c => c.id === editChallengeId ? {...c, title: newTitle} : c)});
-        } else {
-          updateData({ ...data, challenges: [...data.challenges, { id: generateId(), title: newTitle, records: {} }] });
-        }
+      const saveChallenge = () => {
+        if(!title.trim()) return;
+        if(editId) updateData({...data, challenges: data.challenges.map(c => c.id === editId ? {...c, title} : c)});
+        else updateData({ ...data, challenges: [...data.challenges, { id: generateId(), title, records: {} }] });
         setIsAddModalOpen(false);
       };
 
-      const openRecordModal = (challengeId, dayNum) => {
-        setSelectedChallengeId(challengeId);
-        setSelectedDay(dayNum);
-        const c = data.challenges.find(x => x.id === challengeId);
-        const existingRecord = c.records[dayNum];
-        
-        setRecordNote(existingRecord?.note || '');
-        setRecordDate(existingRecord?.date || getTodayStr());
+      const openRec = (cid, day) => {
+        setSelChallenge(cid); setSelDay(day);
+        const record = data.challenges.find(x => x.id === cid).records[day];
+        setRecNote(record?.note || ''); setRecDate(record?.date || getTodayStr());
         setIsRecordModalOpen(true);
       };
 
-      const handleSaveRecord = () => {
-        const newC = data.challenges.map(c => {
-          if(c.id === selectedChallengeId) {
-            return {
-              ...c,
-              records: {
-                ...c.records,
-                [selectedDay]: { completed: true, note: recordNote, date: recordDate }
-              }
-            };
-          }
-          return c;
-        });
-        updateData({...data, challenges: newC});
-        setIsRecordModalOpen(false);
-      };
-
-      const handleRemoveRecord = () => {
-        const newC = data.challenges.map(c => {
-          if(c.id === selectedChallengeId) {
-            const newRecords = {...c.records};
-            delete newRecords[selectedDay];
-            return {...c, records: newRecords};
-          }
-          return c;
-        });
-        updateData({...data, challenges: newC});
+      const saveRec = () => {
+        updateData({...data, challenges: data.challenges.map(c => c.id === selChallenge ? {...c, records: {...c.records, [selDay]: {completed: true, note: recNote, date: recDate}}} : c)});
         setIsRecordModalOpen(false);
       };
 
       return (
         <div className="fade-in space-y-4 pb-10">
-          <button onClick={openAdd} className="w-full py-4 bg-purple-600 text-white rounded-xl font-bold flex justify-center gap-2 shadow-md"><Icons.Plus/> 새 포도알 챌린지</button>
-
-          {data.challenges.length === 0 && <p className="text-center text-slate-400 py-10">진행 중인 챌린지가 없습니다.</p>}
-
-          {data.challenges.map(c => {
-            const total = Object.keys(c.records).length;
-            const bunches = Math.floor(total/100);
-            
-            const grapesHTML = [];
-            for (let i = 1; i <= 100; i++) {
-              const record = c.records[i];
-              const isCompleted = !!record;
-              grapesHTML.push(
-                <button key={i} onClick={() => openRecordModal(c.id, i)} className={`aspect-square rounded-full flex flex-col items-center justify-center transition-transform active:scale-95 shadow-sm overflow-hidden p-0.5 ${isCompleted ? 'bg-gradient-to-br from-purple-500 to-purple-700 text-white' : 'bg-white text-slate-400 border border-slate-200'}`}>
-                  <span className="font-bold text-[10px] md:text-xs leading-none">{i}</span>
-                  {record?.note && <span className="text-[8px] font-normal opacity-80 truncate w-full text-center mt-0.5">{record.note}</span>}
-                </button>
-              );
-            }
-
-            return (
-              <div key={c.id} className="bg-white p-4 sm:p-5 rounded-2xl shadow-sm border border-purple-100">
-                <div className="flex justify-between items-center mb-4">
-                  <h3 className="font-bold text-lg text-slate-800">{c.title}</h3>
-                  <div className="flex gap-2">
-                    <button onClick={()=>openEdit(c)} className="p-1.5 text-indigo-400 bg-indigo-50 rounded-lg hover:bg-indigo-100"><Icons.Edit/></button>
-                    <button onClick={()=>updateData({...data, challenges: data.challenges.filter(x=>x.id!==c.id)})} className="p-1.5 text-red-400 bg-red-50 rounded-lg hover:bg-red-100"><Icons.Trash/></button>
-                  </div>
+          <button onClick={()=>{setEditId(null); setTitle(''); setIsAddModalOpen(true);}} className="w-full py-4 bg-purple-600 text-white rounded-xl font-bold flex justify-center gap-2 shadow-md"><Icons.Plus/> 새 포도알 챌린지</button>
+          {data.challenges.map(c => (
+            <div key={c.id} className="bg-white p-4 rounded-2xl shadow-sm border border-purple-100">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="font-bold text-lg">{c.title}</h3>
+                <div className="flex gap-2">
+                  <button onClick={()=>{setEditId(c.id); setTitle(c.title); setIsAddModalOpen(true);}} className="p-1.5 text-indigo-400 bg-indigo-50 rounded-lg"><Icons.Edit/></button>
+                  <button onClick={()=>updateData({...data, challenges: data.challenges.filter(x=>x.id!==c.id)})} className="p-1.5 text-red-400 bg-red-50 rounded-lg"><Icons.Trash/></button>
                 </div>
-                <div className="flex justify-between items-end mb-2">
-                  <span className="font-bold text-purple-700 bg-purple-100 px-3 py-1 rounded-full text-xs sm:text-sm">완성된 포도: {bunches}송이 🍇</span>
-                  <span className="text-purple-500 font-bold text-sm">{total % 100} / 100</span>
-                </div>
-                
-                <div className="bg-purple-50 p-2 sm:p-3 rounded-xl mb-2">
-                  <div className="grid grid-cols-10 gap-1 sm:gap-1.5">
-                    {grapesHTML}
-                  </div>
-                </div>
-                <p className="text-[10px] text-slate-400 mt-2 text-center">* 동그라미를 클릭하여 날짜와 메모를 기록하세요.</p>
               </div>
-            );
-          })}
-
-          {/* 챌린지 추가/수정 모달 */}
+              <div className="grid grid-cols-10 gap-1 bg-purple-50 p-2 rounded-xl">
+                {Array.from({length:100}).map((_, i) => (
+                  <button key={i+1} onClick={()=>openRec(c.id, i+1)} className={`aspect-square rounded-full flex items-center justify-center text-[8px] sm:text-[10px] font-bold ${c.records[i+1]?'bg-purple-600 text-white':'bg-white text-slate-300 border border-slate-100'}`}>{i+1}</button>
+                ))}
+              </div>
+            </div>
+          ))}
           {isAddModalOpen && (
             <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-              <div className="bg-white rounded-2xl p-5 w-full max-w-sm">
-                <h3 className="font-bold text-lg mb-4">{editChallengeId ? '챌린지 제목 수정' : '새 챌린지 추가'}</h3>
-                <input value={newTitle} onChange={e=>setNewTitle(e.target.value)} placeholder="예) 매일 3km 러닝하기" className="w-full p-3 bg-slate-50 rounded-lg mb-4 border border-slate-200"/>
-                <div className="flex gap-2">
-                  <button onClick={()=>setIsAddModalOpen(false)} className="flex-1 py-3 bg-slate-100 rounded-xl font-bold text-slate-600">취소</button>
-                  <button onClick={handleSaveChallenge} className="flex-1 py-3 bg-purple-600 text-white rounded-xl font-bold">저장</button>
-                </div>
+              <div className="bg-white rounded-2xl p-5 w-full max-w-sm text-slate-800">
+                <h3 className="font-bold text-lg mb-4">챌린지 제목</h3>
+                <input value={title} onChange={e=>setTitle(e.target.value)} className="w-full p-3 bg-slate-50 rounded-lg mb-4 border border-slate-200 outline-none"/>
+                <div className="flex gap-2"><button onClick={()=>setIsAddModalOpen(false)} className="flex-1 py-3 bg-slate-100 rounded-xl font-bold">취소</button><button onClick={saveChallenge} className="flex-1 py-3 bg-purple-600 text-white rounded-xl font-bold">저장</button></div>
               </div>
             </div>
           )}
-
-          {/* 상세 기록 모달 */}
           {isRecordModalOpen && (
             <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-              <div className="bg-white rounded-2xl p-5 w-full max-w-sm">
-                <div className="flex justify-between items-center mb-4 border-b border-slate-100 pb-3">
-                  <h3 className="font-bold text-lg text-purple-700">{selectedDay}일차 기록 🍇</h3>
-                  {data.challenges.find(c=>c.id===selectedChallengeId)?.records[selectedDay] && (
-                     <button onClick={handleRemoveRecord} className="text-xs bg-red-50 text-red-500 px-2 py-1.5 rounded-lg font-bold border border-red-100">포도알 지우기</button>
-                  )}
-                </div>
-                <div className="mb-3">
-                   <label className="block text-xs font-bold text-slate-500 mb-1">달성 날짜</label>
-                   <input type="date" value={recordDate} onChange={e=>setRecordDate(e.target.value)} className="w-full p-2.5 bg-slate-50 rounded-lg border border-slate-200 text-sm outline-none"/>
-                </div>
-                <div className="mb-5">
-                   <label className="block text-xs font-bold text-slate-500 mb-1">메모 (포도알에 작게 표시됨)</label>
-                   <textarea value={recordNote} onChange={e=>setRecordNote(e.target.value)} placeholder="예) 5km 뛰었음!" className="w-full p-2.5 bg-slate-50 rounded-lg border border-slate-200 text-sm outline-none h-20 resize-none"></textarea>
-                </div>
-                <div className="flex gap-2">
-                  <button onClick={()=>setIsRecordModalOpen(false)} className="flex-1 py-3 bg-slate-100 rounded-xl font-bold text-slate-600">닫기</button>
-                  <button onClick={handleSaveRecord} className="flex-1 py-3 bg-purple-600 text-white rounded-xl font-bold">포도알 칠하기</button>
-                </div>
+              <div className="bg-white rounded-2xl p-5 w-full max-w-sm text-slate-800">
+                <h3 className="font-bold text-lg mb-4 text-purple-700">{selDay}일차 기록</h3>
+                <input type="date" value={recDate} onChange={e=>setRecDate(e.target.value)} className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg mb-3 outline-none"/>
+                <textarea value={recNote} onChange={e=>setRecNote(e.target.value)} placeholder="메모" className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg mb-5 h-20 outline-none"></textarea>
+                <div className="flex gap-2"><button onClick={()=>setIsRecordModalOpen(false)} className="flex-1 py-3 bg-slate-100 rounded-xl font-bold">취소</button><button onClick={saveRec} className="flex-1 py-3 bg-purple-600 text-white rounded-xl font-bold">확인</button></div>
               </div>
             </div>
           )}
@@ -814,279 +334,80 @@
       );
     };
 
-    // ==========================================
-    // 5 & 6. 캘린더 (지니 & 롱이 스케줄) 공통 컴포넌트
-    // ==========================================
+    // 4 & 5. 캘린더 (지니 & 롱이 스케줄)
     const CalendarApp = ({ data, updateData, type }) => {
       const isGenie = type === 'genie';
       const colors = isGenie ? { main: 'bg-teal-600', text: 'text-teal-600', light: 'bg-teal-50', border: 'border-teal-100' } : { main: 'bg-pink-500', text: 'text-pink-500', light: 'bg-pink-50', border: 'border-pink-100' };
       const title = isGenie ? '지니의 스케줄 🧞‍♂️' : '롱이의 스케줄 🐶';
-
-      const [currentMonth, setCurrentMonth] = useState(new Date());
-      const [selectedDate, setSelectedDate] = useState(null);
+      const [curMonth, setCurMonth] = useState(new Date());
+      const [selDate, setSelDate] = useState(null);
       const calendarRef = useRef(null);
-      
-      const year = currentMonth.getFullYear();
-      const month = currentMonth.getMonth();
-      const firstDay = new Date(year, month, 1).getDay();
-      const daysInMonth = new Date(year, month + 1, 0).getDate();
+      const year = curMonth.getFullYear(); const month = curMonth.getMonth();
+      const firstDay = new Date(year, month, 1).getDay(); const daysInMonth = new Date(year, month + 1, 0).getDate();
+      const days = []; for(let i=0; i<firstDay; i++) days.push(null); for(let i=1; i<=daysInMonth; i++) days.push(`${year}-${String(month+1).padStart(2,'0')}-${String(i).padStart(2,'0')}`);
 
-      const days = [];
-      for(let i=0; i<firstDay; i++) days.push(null);
-      for(let i=1; i<=daysInMonth; i++) days.push(`${year}-${String(month+1).padStart(2,'0')}-${String(i).padStart(2,'0')}`);
-
-      const handleSave = (dateStr, shift, note) => {
-        const newRecords = {...data.records};
-        newRecords[dateStr] = { shift, note };
-        updateData({...data, records: newRecords});
-        setSelectedDate(null);
-      };
-
-      const handleExportImage = () => {
-        if (!calendarRef.current) return;
-        window.html2canvas(calendarRef.current, { scale: 2, backgroundColor: '#f8fafc' }).then(canvas => {
-          const link = document.createElement('a');
-          link.download = `${isGenie ? '지니' : '롱이'}_스케줄_${year}년_${month+1}월.png`;
-          link.href = canvas.toDataURL('image/png');
-          link.click();
-        });
-      };
-
-      const Modal = () => {
-        if(!selectedDate) return null;
-        const existing = data.records[selectedDate] || { shift: '', note: '' };
-        const [shift, setShift] = useState(existing.shift);
-        const [note, setNote] = useState(existing.note);
-
-        return (
-          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-            <div className="bg-white rounded-2xl p-5 w-full max-w-sm">
-              <h3 className="font-bold text-lg mb-4">{selectedDate} 일정</h3>
-              {isGenie && (
-                <div className="flex gap-2 mb-4">
-                  {['DAY', 'NIGHT', 'OFF'].map(s => {
-                    const val = s.toLowerCase();
-                    return <button key={s} onClick={()=>setShift(shift === val ? '' : val)} className={`flex-1 py-2 rounded-lg font-black border transition-colors ${shift===val ? colors.main+' text-white' : 'bg-white text-slate-500 hover:bg-slate-50'}`}>{s}</button>;
-                  })}
-                </div>
-              )}
-              <textarea value={note} onChange={e=>setNote(e.target.value)} placeholder="추가 일정이나 메모를 적어주세요." className="w-full p-3 bg-slate-50 rounded-lg mb-4 border border-slate-200 h-24"></textarea>
-              <div className="flex gap-2">
-                <button onClick={()=>setSelectedDate(null)} className="flex-1 py-3 bg-slate-100 rounded-xl font-bold text-slate-600">닫기</button>
-                <button onClick={()=>handleSave(selectedDate, shift, note)} className={`flex-1 py-3 ${colors.main} text-white rounded-xl font-bold`}>저장</button>
-              </div>
-            </div>
-          </div>
-        );
-      };
+      const save = (d, s, n) => { updateData({...data, records: {...data.records, [d]: {shift:s, note:n}}}); setSelDate(null); };
+      const exportImg = () => { html2canvas(calendarRef.current, { scale: 2, backgroundColor: '#f8fafc' }).then(c => { const a = document.createElement('a'); a.download = `Schedule_${year}_${month+1}.png`; a.href = c.toDataURL(); a.click(); }); };
 
       return (
         <div className="fade-in pb-10">
-          <div className="flex justify-end mb-2">
-            <button onClick={handleExportImage} className="text-xs bg-white border border-slate-200 text-slate-600 px-3 py-2 rounded-xl font-bold flex items-center gap-1 shadow-sm active:scale-95 transition-transform">
-               📸 캘린더 이미지로 저장
-            </button>
-          </div>
-
-          <div ref={calendarRef} className="bg-slate-50 p-2 -m-2 rounded-xl">
+          <div className="flex justify-end mb-2"><button onClick={exportImg} className="text-xs bg-white border border-slate-200 text-slate-600 px-3 py-2 rounded-xl font-bold shadow-sm">📸 이미지 저장</button></div>
+          <div ref={calendarRef} className="bg-slate-50 p-2 rounded-xl">
             <div className="flex justify-between items-center bg-white p-3 rounded-xl shadow-sm border border-slate-100 mb-4">
-              <button onClick={() => setCurrentMonth(new Date(year, month-1, 1))} className="p-2 text-slate-400">&lt;</button>
+              <button onClick={() => setCurMonth(new Date(year, month-1, 1))} className="p-2 text-slate-400">&lt;</button>
               <span className={`font-bold text-lg ${colors.text}`}>{year}년 {month+1}월 {title}</span>
-              <button onClick={() => setCurrentMonth(new Date(year, month+1, 1))} className="p-2 text-slate-400">&gt;</button>
+              <button onClick={() => setCurMonth(new Date(year, month+1, 1))} className="p-2 text-slate-400">&gt;</button>
             </div>
-
-            <div className="bg-white rounded-2xl shadow-sm p-2 sm:p-3 border border-slate-100">
-              <div className="grid grid-cols-7 gap-1 text-center font-bold text-xs text-slate-400 mb-2">
-                <div className="text-red-400">일</div><div>월</div><div>화</div><div>수</div><div>목</div><div>금</div><div className="text-blue-400">토</div>
-              </div>
-              <div className="grid grid-cols-7 gap-1">
-                {days.map((d, i) => {
-                  if(!d) return <div key={i} className="min-h-[5rem] sm:min-h-[6rem] bg-transparent"></div>;
-                  const record = data.records[d];
-                  const dayNum = parseInt(d.split('-')[2]);
-                  const hasContent = record?.note || record?.shift;
-                  return (
-                    <div key={d} onClick={()=>setSelectedDate(d)} className={`min-h-[5rem] sm:min-h-[6rem] p-1 rounded-xl border overflow-hidden flex flex-col items-center justify-start cursor-pointer active:scale-95 transition-transform ${hasContent ? `${colors.light} ${colors.border}` : 'bg-white border-slate-50 hover:bg-slate-50'}`}>
-                      <span className="text-[11px] sm:text-xs font-bold text-slate-700 mb-0.5">{dayNum}</span>
-                      
-                      {isGenie && record?.shift && (
-                        <span className={`text-[12px] sm:text-[14px] font-black leading-none mb-1 mt-0.5 tracking-tight ${
-                          record.shift === 'day' ? 'text-orange-500' :
-                          record.shift === 'night' ? 'text-indigo-600' :
-                          'text-slate-400'
-                        }`}>
-                          {record.shift.toUpperCase()}
-                        </span>
-                      )}
-
-                      {!isGenie && record?.note && <span className="text-xl sm:text-2xl leading-none mb-1 mt-0.5">🐶</span>}
-                      {record?.note && <div className="text-[9px] text-slate-600 w-full text-center leading-tight line-clamp-2 px-0.5">{record.note}</div>}
-                    </div>
-                  );
-                })}
-              </div>
+            <div className="grid grid-cols-7 gap-1 bg-white p-2 rounded-2xl shadow-sm border border-slate-100">
+              {['일','월','화','수','목','금','토'].map((d,i)=><div key={i} className={`text-center font-bold text-xs mb-2 ${i===0?'text-red-400':i===6?'text-blue-400':'text-slate-400'}`}>{d}</div>)}
+              {days.map((d, i) => {
+                if(!d) return <div key={i}></div>;
+                const rec = data.records[d];
+                return (
+                  <div key={d} onClick={()=>setSelDate(d)} className={`min-h-[5rem] p-1 rounded-xl border flex flex-col items-center justify-start cursor-pointer active:scale-95 transition-transform ${rec?.note || rec?.shift ? `${colors.light} ${colors.border}` : 'bg-white border-slate-50'}`}>
+                    <span className="text-[11px] font-bold text-slate-700 mb-1">{parseInt(d.split('-')[2])}</span>
+                    {isGenie && rec?.shift && <span className={`text-[12px] font-black leading-none mb-1 ${rec.shift==='day'?'text-orange-500':rec.shift==='night'?'text-indigo-600':'text-slate-400'}`}>{rec.shift.toUpperCase()}</span>}
+                    {!isGenie && rec?.note && <span className="text-xl">🐶</span>}
+                    {rec?.note && <div className="text-[9px] text-slate-600 line-clamp-2 px-0.5">{rec.note}</div>}
+                  </div>
+                );
+              })}
             </div>
           </div>
-          <Modal />
+          {selDate && (
+            <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl p-5 w-full max-w-sm text-slate-800">
+                <h3 className="font-bold text-lg mb-4">{selDate} 일정</h3>
+                {isGenie && <div className="flex gap-2 mb-4">{['DAY','NIGHT','OFF'].map(s=><button key={s} onClick={()=>save(selDate, s.toLowerCase(), data.records[selDate]?.note||'')} className={`flex-1 py-2 rounded-lg font-black border ${data.records[selDate]?.shift===s.toLowerCase()?`${colors.main} text-white`:'bg-white'}`}>{s}</button>)}</div>}
+                <textarea defaultValue={data.records[selDate]?.note||''} onBlur={e=>save(selDate, data.records[selDate]?.shift||'', e.target.value)} placeholder="메모" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl mb-4 h-24 outline-none"></textarea>
+                <button onClick={()=>setSelDate(null)} className="w-full py-3 bg-slate-100 rounded-xl font-bold">닫기</button>
+              </div>
+            </div>
+          )}
         </div>
       );
     };
 
-    // ==========================================
-    // 7. 합리적 소비 진단 테스트
-    // ==========================================
+    // 6. 합리적 소비 진단 테스트
     const ConsumptionTest = () => {
-      const [answers, setAnswers] = useState(Array(6).fill(null));
-      const [showResult, setShowResult] = useState(false);
-
-      const questions = [
-        "1. 구매 전 24시간 이상 충분히 고민해보았는가?",
-        "2. 이 물건이 나의 현재 목표에 기여하는가?",
-        "3. 이미 비슷한 기능을 하는 제품이 있는가?",
-        "4. 단지 '할인' 때문에 충동적으로 사고 싶은가?",
-        "5. 장기적으로 꾸준히 쓸 계획이 있는가?",
-        "6. 소비 후 카드값을 보며 후회하지 않을 자신 있는가?"
-      ];
-
-      const calculateScore = () => {
-        if(answers.includes(null)) return alert("모든 항목에 답해주세요!");
-        let score = 0;
-        [0,1,4,5].forEach(i => { if(answers[i] === 'O') score += 10; });
-        [2,3].forEach(i => { if(answers[i] === 'X') score += 10; });
-        setShowResult(score);
-      };
-
-      if (showResult !== false) {
-        return (
-          <div className="fade-in bg-white p-8 rounded-3xl shadow-sm text-center border border-slate-100">
-            <h2 className="text-2xl font-black mb-2">진단 결과</h2>
-            <div className="text-6xl font-black text-rose-500 mb-6">{showResult}점</div>
-            {showResult >= 50 ? (
-              <div className="bg-emerald-50 text-emerald-700 p-4 rounded-xl font-bold">✨ 구매하셔도 좋을 거 같아요!</div>
-            ) : (
-              <div className="bg-rose-50 text-rose-700 p-4 rounded-xl font-bold">🤔 구매를 다시 한 번 고려해보세요.</div>
-            )}
-            <button onClick={()=>{setAnswers(Array(6).fill(null)); setShowResult(false);}} className="mt-8 w-full py-4 bg-slate-800 text-white rounded-xl font-bold">다시 테스트하기</button>
-          </div>
-        );
-      }
-
-      return (
-        <div className="fade-in space-y-4 pb-10">
-          <div className="bg-rose-50 p-4 rounded-2xl border border-rose-100 mb-4">
-            <h2 className="font-bold text-rose-700 text-lg">합리적 소비 진단</h2>
-            <p className="text-sm text-rose-600 mt-1">사고 싶은 물건이 생겼나요? 구매 전 스스로를 점검해보세요.</p>
-          </div>
-
-          <div className="space-y-3">
-            {questions.map((q, i) => (
-              <div key={i} className="bg-white p-4 rounded-xl shadow-sm border border-slate-100">
-                <p className="font-medium text-slate-800 mb-3 text-sm">{q}</p>
-                <div className="flex gap-2">
-                  <button onClick={()=>{const n=[...answers]; n[i]='O'; setAnswers(n);}} className={`flex-1 py-2 rounded-lg font-bold border transition-colors ${answers[i]==='O' ? 'bg-rose-500 text-white border-rose-500' : 'bg-slate-50 text-slate-400 border-slate-200'}`}>O (그렇다)</button>
-                  <button onClick={()=>{const n=[...answers]; n[i]='X'; setAnswers(n);}} className={`flex-1 py-2 rounded-lg font-bold border transition-colors ${answers[i]==='X' ? 'bg-slate-500 text-white border-slate-500' : 'bg-slate-50 text-slate-400 border-slate-200'}`}>X (아니다)</button>
-                </div>
-              </div>
-            ))}
-          </div>
-          <button onClick={calculateScore} className="w-full py-4 bg-rose-500 text-white rounded-xl font-bold shadow-md mt-4 text-lg">결과 확인하기</button>
-        </div>
-      );
+      const [ans, setAns] = useState(Array(6).fill(null)); const [res, setRes] = useState(false);
+      const qs = ["1. 구매 전 24시간 고민했는가?", "2. 현재 목표에 기여하는가?", "3. 비슷한 제품이 있는가?", "4. 단지 '할인' 때문인가?", "5. 꾸준히 쓸 계획인가?", "6. 카드값 후회 안 할 자신 있는가?"];
+      const calc = () => { if(ans.includes(null)) return alert("다 답해줘!"); let s=0; [0,1,4,5].forEach(i=>ans[i]==='O'&&(s+=10)); [2,3].forEach(i=>ans[i]==='X'&&(s+=10)); setRes(s); };
+      if (res !== false) return <div className="fade-in bg-white p-8 rounded-3xl text-center shadow-sm"> <h2 className="text-2xl font-black mb-2">결과</h2> <div className="text-6xl font-black text-rose-500 mb-6">{res}점</div> <div className={`p-4 rounded-xl font-bold ${res>=50?'bg-emerald-50 text-emerald-700':'bg-rose-50 text-rose-700'}`}>{res>=50?'✨ 사셔도 좋아요!':'🤔 다시 생각해보세요.'}</div> <button onClick={()=>{setAns(Array(6).fill(null)); setRes(false);}} className="mt-8 w-full py-4 bg-slate-800 text-white rounded-xl font-bold">다시하기</button> </div>;
+      return <div className="fade-in space-y-4"> {qs.map((q,i)=><div key={i} className="bg-white p-4 rounded-xl border border-slate-100"><p className="font-medium mb-3 text-sm">{q}</p><div className="flex gap-2"><button onClick={()=>{const n=[...ans]; n[i]='O'; setAns(n);}} className={`flex-1 py-2 rounded-lg font-bold border ${ans[i]==='O'?'bg-rose-500 text-white':'bg-slate-50 text-slate-400'}`}>O</button><button onClick={()=>{const n=[...ans]; n[i]='X'; setAns(n);}} className={`flex-1 py-2 rounded-lg font-bold border ${ans[i]==='X'?'bg-rose-500 text-white':'bg-slate-50 text-slate-400'}`}>X</button></div></div>)} <button onClick={calc} className="w-full py-4 bg-rose-500 text-white rounded-xl font-bold shadow-md">결과 확인</button> </div>;
     };
 
-    // ==========================================
-    // 메인 App & 홈 화면 (자동 마이그레이션 포함)
-    // ==========================================
+    // 메인 App
     const App = () => {
-      const [currentView, setCurrentView] = useState('home');
-      
-      const [globalData, setGlobalData] = useState(() => {
-        const saved = localStorage.getItem('jisoo_all_data');
-        if (saved) return JSON.parse(saved);
-
-        const baseData = { ...defaultData };
-        let isMigrated = false;
-
-        try {
-          const oldRoutine = localStorage.getItem('jisoo_routine_data');
-          if (oldRoutine) {
-            const parsed = JSON.parse(oldRoutine);
-            if (parsed.categories) baseData.routine.categories = parsed.categories;
-            if (parsed.history) baseData.routine.history = parsed.history;
-            isMigrated = true;
-          }
-        } catch(e){}
-
-        try {
-          const oldGrape = localStorage.getItem('100days-challenges');
-          if (oldGrape) {
-            const parsed = JSON.parse(oldGrape);
-            if (Array.isArray(parsed)) {
-              baseData.grape.challenges = parsed.map(c => {
-                let hasDateKeys = false;
-                const newRecords = {};
-                let dayCounter = 1;
-                
-                Object.keys(c.records).sort().forEach(k => {
-                  if (k.includes('-')) {
-                    hasDateKeys = true;
-                    newRecords[dayCounter] = { completed: true, note: '', date: k, ...(typeof c.records[k] === 'object' ? c.records[k] : {}) };
-                    dayCounter++;
-                  } else {
-                    newRecords[k] = c.records[k];
-                  }
-                });
-                return { ...c, records: hasDateKeys ? newRecords : c.records };
-              });
-              isMigrated = true;
-            }
-          }
-        } catch(e){}
-
-        if (isMigrated) {
-          localStorage.setItem('jisoo_all_data', JSON.stringify(baseData));
-        }
-
-        return baseData;
-      });
-
-      useEffect(() => {
-        localStorage.setItem('jisoo_all_data', JSON.stringify(globalData));
-      }, [globalData]);
-
-      const updateSection = (section, data) => {
-        setGlobalData(prev => ({ ...prev, [section]: data }));
-      };
-
-      const handleExport = () => {
-        const dataStr = JSON.stringify(globalData);
-        const blob = new Blob([dataStr], { type: "application/json" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url; a.download = `JISOO_backup_${getTodayStr()}.json`;
-        document.body.appendChild(a); a.click(); document.body.removeChild(a);
-        alert("백업 파일이 안전하게 다운로드되었습니다.");
-      };
-
-      const handleImport = (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = (event) => {
-          try {
-            const parsed = JSON.parse(event.target.result);
-            if(parsed.manual && parsed.routine) {
-              setGlobalData(parsed);
-              alert("데이터가 성공적으로 복원되었습니다!");
-            } else throw new Error();
-          } catch { alert("올바른 백업 파일이 아닙니다."); }
-        };
-        reader.readAsText(file);
-      };
+      const [cur, setCur] = useState('home');
+      const [all, setAll] = useState(() => { const s=localStorage.getItem('jisoo_all_data'); return s?JSON.parse(s):defaultData; });
+      useEffect(() => localStorage.setItem('jisoo_all_data', JSON.stringify(all)), [all]);
+      const upd = (sec, d) => setAll(prev => ({...prev, [sec]: d}));
+      const exp = () => { const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([JSON.stringify(all)],{type:"application/json"})); a.download=`backup_${getTodayStr()}.json`; a.click(); };
+      const imp = (e) => { const r=new FileReader(); r.onload=v=>{ try{setAll(JSON.parse(v.target.result)); alert("성공!");}catch{alert("실패!");} }; r.readAsText(e.target.files[0]); };
 
       const menus = [
         { id: 'manual', title: '나 사용법', icon: '📖', color: 'bg-indigo-100 text-indigo-700' },
-        { id: 'planner', title: '데일리 플래너', icon: '📝', color: 'bg-blue-100 text-blue-700' },
         { id: 'routine', title: '오늘 루틴', icon: '✨', color: 'bg-emerald-100 text-emerald-700' },
         { id: 'grape', title: '포도알 챌린지', icon: '🍇', color: 'bg-purple-100 text-purple-700' },
         { id: 'genie', title: '지니의 스케줄', icon: '🧞‍♂️', color: 'bg-teal-100 text-teal-700' },
@@ -1094,61 +415,40 @@
         { id: 'test', title: '소비 진단 테스트', icon: '🛒', color: 'bg-rose-100 text-rose-700' }
       ];
 
-      const renderView = () => {
-        switch(currentView) {
-          case 'manual': return <ManualApp data={globalData.manual} updateData={(d)=>updateSection('manual',d)} />;
-          case 'planner': return <PlannerApp data={globalData.planner} updateData={(d)=>updateSection('planner',d)} navigateTo={setCurrentView} />;
-          case 'routine': return <RoutineApp data={globalData.routine} updateData={(d)=>updateSection('routine',d)} />;
-          case 'grape': return <GrapeApp data={globalData.grape} updateData={(d)=>updateSection('grape',d)} />;
-          case 'genie': return <CalendarApp data={globalData.genie} updateData={(d)=>updateSection('genie',d)} type="genie" />;
-          case 'longie': return <CalendarApp data={globalData.longie} updateData={(d)=>updateSection('longie',d)} type="longie" />;
+      const render = () => {
+        switch(cur) {
+          case 'manual': return <ManualApp data={all.manual} updateData={d=>upd('manual',d)} />;
+          case 'routine': return <RoutineApp data={all.routine} updateData={d=>upd('routine',d)} />;
+          case 'grape': return <GrapeApp data={all.grape} updateData={d=>upd('grape',d)} />;
+          case 'genie': return <CalendarApp data={all.genie} updateData={d=>upd('genie',d)} type="genie" />;
+          case 'longie': return <CalendarApp data={all.longie} updateData={d=>upd('longie',d)} type="longie" />;
           case 'test': return <ConsumptionTest />;
           default: return (
             <div className="fade-in pb-10">
               <div className="mb-6 flex justify-between items-center bg-white p-4 rounded-2xl shadow-sm border border-slate-100">
-                <div>
-                  <h1 className="text-xl font-black text-slate-800">JISOO</h1>
-                  <p className="text-sm text-slate-500">오늘도 알찬 하루 보내세요!</p>
-                </div>
+                <div><h1 className="text-xl font-black">JISOO</h1><p className="text-sm text-slate-500">오늘도 알찬 하루 보내세요!</p></div>
                 <div className="flex gap-2">
-                  <button onClick={handleExport} className="p-2 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200" title="전체 데이터 백업"><Icons.Download/></button>
-                  <label className="p-2 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 cursor-pointer" title="전체 데이터 복원">
-                    <Icons.Upload/>
-                    <input type="file" accept=".json" onChange={handleImport} className="hidden" />
-                  </label>
+                  <button onClick={exp} className="p-2 bg-slate-100 rounded-lg"><Icons.Download/></button>
+                  <label className="p-2 bg-slate-100 rounded-lg cursor-pointer"><Icons.Upload/><input type="file" onChange={imp} className="hidden"/></label>
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-3">
-                {menus.map((m, i) => (
-                  <button key={m.id} onClick={() => setCurrentView(m.id)} className={`p-5 rounded-2xl shadow-sm border border-slate-50 flex flex-col items-start gap-3 transition-transform active:scale-95 bg-white`}>
-                    <div className={`w-12 h-12 flex items-center justify-center rounded-full text-2xl ${m.color}`}>{m.icon}</div>
-                    <span className="font-bold text-slate-800 text-left">{m.title}</span>
-                  </button>
-                ))}
+                {menus.map(m=><button key={m.id} onClick={()=>setCur(m.id)} className="p-5 rounded-2xl shadow-sm bg-white flex flex-col items-start gap-3 active:scale-95 transition-transform"><div className={`w-12 h-12 flex items-center justify-center rounded-full text-2xl ${m.color}`}>{m.icon}</div><span className="font-bold">{m.title}</span></button>)}
               </div>
             </div>
           );
         }
       };
 
-      const currentMenu = menus.find(m => m.id === currentView);
-
       return (
         <div className="min-h-screen max-w-md mx-auto relative bg-slate-50">
-          {currentView !== 'home' && (
-            <header className="sticky top-0 bg-white/80 backdrop-blur-md z-40 border-b border-slate-100 p-4 flex items-center justify-between env-safe-area-top">
-              <button onClick={() => setCurrentView('home')} className="flex items-center gap-1 text-slate-500 font-bold active:text-slate-800"><Icons.Back/> 홈으로</button>
-              <span className="font-black text-slate-800">{currentMenu?.title} {currentMenu?.icon}</span>
-              <div className="w-8"></div>
-            </header>
-          )}
-          <main className="p-4 pt-6">{renderView()}</main>
+          {cur!=='home' && <header className="sticky top-0 bg-white/80 backdrop-blur-md z-40 border-b border-slate-100 p-4 flex items-center justify-between"><button onClick={()=>setCur('home')} className="flex items-center gap-1 text-slate-500 font-bold"><Icons.Back/> 홈</button><span className="font-black text-slate-800">{menus.find(m=>m.id===cur)?.title}</span><div className="w-8"></div></header>}
+          <main className="p-4 pt-6">{render()}</main>
         </div>
       );
     };
 
-    const root = ReactDOM.createRoot(document.getElementById('root'));
-    root.render(<App />);
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
   </script>
 </body>
 </html>
