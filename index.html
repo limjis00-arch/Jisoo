@@ -108,6 +108,7 @@
       
       const allTags = [...new Set(data.items.flatMap(i => i.tags || []))];
       const filteredItems = filterTag ? data.items.filter(i => (i.tags || []).includes(filterTag)) : data.items;
+      const availableTags = allTags.filter(t => !selectedTags.includes(t));
 
       return (
         <div className="fade-in space-y-4 pb-10">
@@ -147,6 +148,19 @@
                   <button onClick={()=>{if(tagInput) { setSelectedTags([...new Set([...selectedTags, tagInput])]); setTagInput(''); }}} className="px-3 py-2 bg-slate-200 text-slate-700 rounded-lg text-sm font-bold hover:bg-slate-300">추가</button>
                 </div>
 
+                {availableTags.length > 0 && (
+                  <div className="mb-4">
+                    <span className="text-xs font-bold text-slate-500 block mb-1">기존 태그 간편 선택</span>
+                    <div className="flex flex-wrap gap-1">
+                      {availableTags.map(t => (
+                        <span key={t} onClick={() => setSelectedTags([...selectedTags, t])} className="bg-slate-100 text-slate-600 px-2 py-1.5 rounded-lg text-xs font-medium cursor-pointer hover:bg-indigo-50 hover:text-indigo-600 transition-colors">
+                          + {t}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 <div className="flex flex-wrap gap-1 mb-4 pt-2 border-t border-slate-100">
                   {selectedTags.length === 0 && <span className="text-xs text-slate-400">선택된 태그가 없습니다.</span>}
                   {selectedTags.map(t => <span key={t} onClick={()=>setSelectedTags(selectedTags.filter(st=>st!==t))} className="bg-indigo-100 text-indigo-700 px-2 py-1 rounded text-sm cursor-pointer hover:bg-indigo-200 font-bold">#{t} &times;</span>)}
@@ -160,33 +174,73 @@
     };
 
     // ==========================================
-    // 2. 데일리 플래너 (10 Min Planner) - 최신 완벽 버전
+    // 2. 데일리 플래너 (10 Min Planner) - 완벽 수정본
     // ==========================================
-    const PlannerApp = ({ data, updateData }) => {
+    const PlannerApp = ({ data, updateData, navigateTo }) => {
       const [date, setDate] = useState(getTodayStr());
-      const [activeTask, setActiveTask] = useState(null); // null = 드래그 시 선택 모드
       const [isEditMode, setIsEditMode] = useState(false);
       
-      const [taskName, setTaskName] = useState('');
-      const [taskColor, setTaskColor] = useState('#3b82f6');
+      const [activeTask, setActiveTask] = useState(null); // null, 'eraser', 또는 특정 taskId
+      const [selection, setSelection] = useState([]); // 드래그 중인 덩어리(인덱스 배열)
       
-      // 임시로 드래그 선택된 셀들의 인덱스 배열
-      const [selection, setSelection] = useState([]);
+      const [taskName, setTaskName] = useState('');
+      const [taskColor, setTaskColor] = useState('#93c5fd'); // 기본 파스텔 블루
+      
+      // 예쁜 파스텔 팔레트 8종
+      const pastelPalette = [
+        '#fca5a5', '#fdba74', '#fcd34d', '#86efac', 
+        '#93c5fd', '#c4b5fd', '#f472b6', '#cbd5e1'
+      ];
 
       const currentDayRecords = data.records[date] || {};
-      const isDraggingRef = useRef(false);
 
-      // 드래그 중 스크롤 방지 및 부드러운 연결 처리
+      const isDraggingRef = useRef(false);
+      const dragModeRef = useRef('select'); // 'select', 'paint', 'erase'
+
+      // 모바일 드래그 중 화면 스크롤 방지 및 부드러운 드래그 처리
+      useEffect(() => {
+        const handleUp = () => { isDraggingRef.current = false; };
+        window.addEventListener('pointerup', handleUp);
+        window.addEventListener('pointercancel', handleUp);
+        window.addEventListener('touchend', handleUp);
+        return () => {
+          window.removeEventListener('pointerup', handleUp);
+          window.removeEventListener('pointercancel', handleUp);
+          window.removeEventListener('touchend', handleUp);
+        };
+      }, []);
+
+      const getElementIdxFromPoint = (clientX, clientY) => {
+        const el = document.elementFromPoint(clientX, clientY);
+        if (el && el.dataset.idx !== undefined) {
+          return parseInt(el.dataset.idx);
+        }
+        return null;
+      };
+
       const handlePointerDown = (e, idx) => {
         if (!isEditMode) return;
+        if (e.target.releasePointerCapture && e.pointerId) {
+          e.target.releasePointerCapture(e.pointerId);
+        }
         isDraggingRef.current = true;
-        processDragIndex(idx);
+        
+        if (activeTask === 'eraser') {
+          dragModeRef.current = 'erase';
+          processDragIndex(idx, 'erase');
+        } else if (activeTask) {
+          dragModeRef.current = 'paint';
+          processDragIndex(idx, 'paint');
+        } else {
+          // 아무 할 일도 선택하지 않고 표를 문지르면 임시 선택(회색) 모드
+          dragModeRef.current = 'select';
+          setSelection([idx]); // 새 드래그 시 기존 선택 초기화 후 새로 잡기
+        }
       };
 
       const handlePointerMove = (e) => {
         if (!isDraggingRef.current || !isEditMode) return;
         
-        // 터치 & 마우스 좌표 구하기
         let clientX, clientY;
         if (e.touches && e.touches.length > 0) {
           clientX = e.touches[0].clientX;
@@ -196,37 +250,27 @@
           clientY = e.clientY;
         }
 
-        // 현재 손가락(마우스) 위치에 있는 셀 찾기
-        const el = document.elementFromPoint(clientX, clientY);
-        if (el && el.dataset.idx !== undefined) {
-          const idx = parseInt(el.dataset.idx);
-          processDragIndex(idx);
+        const idx = getElementIdxFromPoint(clientX, clientY);
+        if (idx !== null) {
+          processDragIndex(idx, dragModeRef.current);
         }
       };
 
-      const handlePointerUp = () => {
-        isDraggingRef.current = false;
-      };
-
-      // 드래그된 칸 처리 (지우개, 선택한 항목 칠하기, 임시 선택하기)
-      const processDragIndex = (idx) => {
-        if (activeTask === 'eraser') {
-          // 지우개 모드
+      const processDragIndex = (idx, mode) => {
+        if (mode === 'erase') {
           const newRecords = { ...data.records };
           if (newRecords[date] && newRecords[date][idx]) {
             delete newRecords[date][idx];
             updateData({ ...data, records: newRecords });
           }
-        } else if (activeTask) {
-          // 기존 항목 칠하기 모드
+        } else if (mode === 'paint') {
           const newRecords = { ...data.records };
           if (!newRecords[date]) newRecords[date] = {};
           if (newRecords[date][idx] !== activeTask) {
             newRecords[date][idx] = activeTask;
             updateData({ ...data, records: newRecords });
           }
-        } else {
-          // 임시 선택 모드 (빈 칸 드래그)
+        } else if (mode === 'select') {
           setSelection(prev => {
             if (!prev.includes(idx)) return [...prev, idx];
             return prev;
@@ -234,62 +278,112 @@
         }
       };
 
-      const handleAddTask = () => {
-        if (!taskName.trim()) return;
+      // 선택된 회색 덩어리에 새 할 일을 지정
+      const handleAddAndAssign = () => {
+        if (selection.length === 0) {
+          return alert("시간표에서 영역을 드래그해서 먼저 지정해주세요!");
+        }
+        if (!taskName.trim()) {
+          return alert("할 일 이름을 입력해주세요!");
+        }
         
-        // 새 할 일 생성 및 저장
-        const newTask = { id: generateId(), name: taskName, color: taskColor };
+        const newTask = { id: generateId(), name: taskName, color: taskColor, isArchived: false };
         const newTasks = [...data.tasks, newTask];
         
-        // 만약 드래그로 선택해둔 덩어리가 있다면 거기에 방금 만든 할 일을 한 번에 칠함!
         let newRecords = { ...data.records };
-        if (selection.length > 0) {
-          if (!newRecords[date]) newRecords[date] = {};
-          selection.forEach(idx => {
-            newRecords[date][idx] = newTask.id;
-          });
-          setSelection([]); // 칠한 후 선택 해제
-        }
+        if (!newRecords[date]) newRecords[date] = {};
+        
+        selection.forEach(idx => {
+          newRecords[date][idx] = newTask.id;
+        });
 
         updateData({ ...data, tasks: newTasks, records: newRecords });
+        setSelection([]);
         setTaskName('');
-        setActiveTask(newTask.id);
+        setActiveTask(null); // 추가 후 선택 해제
+      };
+
+      // 선택된 회색 덩어리에 기존 할 일을 칠함
+      const handleAssignExistingTask = (taskId) => {
+        if (taskId === 'eraser') {
+          setActiveTask(activeTask === 'eraser' ? null : 'eraser');
+          setSelection([]);
+          return;
+        }
+
+        if (selection.length > 0) {
+          // 이미 덩어리를 잡아놨으면 거기에 칠함
+          let newRecords = { ...data.records };
+          if (!newRecords[date]) newRecords[date] = {};
+          selection.forEach(idx => {
+            newRecords[date][idx] = taskId;
+          });
+          updateData({ ...data, records: newRecords });
+          setSelection([]);
+          setActiveTask(null);
+        } else {
+          // 잡아놓은 덩어리가 없으면, 해당 항목을 브러시(펜)로 선택
+          setActiveTask(activeTask === taskId ? null : taskId);
+        }
       };
 
       const handleDeleteTask = (taskId) => {
-        updateData({ ...data, tasks: data.tasks.filter(t => t.id !== taskId) });
-        if(activeTask === taskId) setActiveTask(null);
+        // 아카이브 처리로 목록에서만 안 보이게 (과거 칠한 건 남겨둠)
+        updateData({ 
+          ...data, 
+          tasks: data.tasks.map(t => t.id === taskId ? { ...t, isArchived: true } : t) 
+        });
+        if (activeTask === taskId) setActiveTask(null);
       };
 
-      // 연속된 시간 덩어리 그룹화 및 정중앙 칸 찾기
+      // 연속된 시간 덩어리 그룹화 및 무게중심(정중앙) 좌표 찾기
       const chunks = useMemo(() => {
         const result = [];
-        let currentChunk = null;
-
+        const visited = new Set();
+        
         for (let i = 0; i < 144; i++) {
           const taskId = currentDayRecords[i];
-          if (taskId) {
-            if (currentChunk && currentChunk.taskId === taskId) {
-              currentChunk.cells.push(i);
-            } else {
-              if (currentChunk) result.push(currentChunk);
-              currentChunk = { taskId, cells: [i] };
+          if (taskId && !visited.has(i)) {
+            const cells = [];
+            const q = [i];
+            visited.add(i);
+            
+            // 인접 칸 BFS 탐색 (같은 taskId 끼리 묶음)
+            while(q.length > 0) {
+              const curr = q.shift();
+              cells.push(curr);
+              const ch = Math.floor(curr/6);
+              const cm = curr%6;
+              const neighbors = [];
+              if (ch > 0) neighbors.push((ch-1)*6 + cm);
+              if (ch < 23) neighbors.push((ch+1)*6 + cm);
+              if (cm > 0) neighbors.push(ch*6 + (cm-1));
+              if (cm < 5) neighbors.push(ch*6 + (cm+1));
+              
+              for (let n of neighbors) {
+                if (!visited.has(n) && currentDayRecords[n] === taskId) {
+                  visited.add(n);
+                  q.push(n);
+                }
+              }
             }
-          } else {
-            if (currentChunk) {
-              result.push(currentChunk);
-              currentChunk = null;
-            }
+            
+            // 무게중심(Centroid) 계산
+            let sumRow = 0, sumCol = 0;
+            cells.forEach(idx => {
+              sumRow += Math.floor(idx / 6);
+              sumCol += idx % 6;
+            });
+            const avgRow = sumRow / cells.length;
+            const avgCol = sumCol / cells.length;
+            
+            result.push({ taskId, cells, centroid: { r: avgRow, c: avgCol } });
           }
         }
-        if (currentChunk) result.push(currentChunk);
-        
-        // 덩어리의 한가운데 셀 구하기
-        result.forEach(c => {
-          c.middleIdx = c.cells[Math.floor(c.cells.length / 2)];
-        });
         return result;
       }, [currentDayRecords]);
+
+      const activeTasksList = data.tasks.filter(t => !t.isArchived);
 
       const renderGrid = () => {
         return (
@@ -305,37 +399,45 @@
             <div 
               className={`flex-1 relative bg-white ${isEditMode ? 'touch-none' : ''}`} 
               style={{ display: 'grid', gridTemplateRows: 'repeat(24, 1.75rem)', gridTemplateColumns: 'repeat(6, 1fr)' }}
-              onPointerDown={(e) => handlePointerDown(e, null)}
               onTouchMove={handlePointerMove}
               onPointerMove={handlePointerMove}
-              onPointerUp={handlePointerUp}
-              onTouchEnd={handlePointerUp}
-              onPointerCancel={handlePointerUp}
-              onMouseLeave={handlePointerUp}
             >
+              {/* 셀별 배경색 및 터치 영역 */}
               {Array.from({length:144}).map((_, idx) => {
                  const taskId = currentDayRecords[idx];
                  const task = data.tasks.find(t => t.id === taskId);
                  const isSelected = selection.includes(idx);
                  
-                 // 현재 칸이 해당 덩어리의 정중앙 칸인지 확인
-                 const chunk = chunks.find(c => c.middleIdx === idx);
-                 const showText = chunk && task;
-                 
                  return (
                     <div 
                       key={idx}
-                      data-idx={idx} // 부드러운 드래그를 위해 필수
+                      data-idx={idx}
                       onPointerDown={(e) => handlePointerDown(e, idx)}
-                      className={`border-r border-b border-slate-200 transition-colors flex items-center justify-center relative ${isEditMode ? 'cursor-pointer' : ''} ${task ? 'shadow-inner' : ''}`}
+                      className={`border-r border-b border-slate-200 transition-colors ${isEditMode ? 'cursor-pointer' : ''} ${task ? 'shadow-inner' : ''}`}
                       style={{ backgroundColor: task ? task.color : (isSelected ? '#e2e8f0' : 'transparent') }}
-                    >
-                      {/* 정중앙 칸일 때만 글씨를 띄움 (칸 영역 무시하고 뻗어나감) */}
-                      {showText && (
-                        <span className="absolute z-10 pointer-events-none text-white font-black whitespace-nowrap text-sm sm:text-base" style={{textShadow: '0 2px 4px rgba(0,0,0,0.8)'}}>
+                    ></div>
+                 )
+              })}
+              
+              {/* 완벽한 중앙에 글씨 띄우기 (absolute 위치 활용) */}
+              {chunks.map((chunk, i) => {
+                 const task = data.tasks.find(t => t.id === chunk.taskId);
+                 if (!task) return null;
+                 
+                 // (avgRow + 0.5) / 24 * 100 -> 그리드의 % 높이
+                 const topPercent = ((chunk.centroid.r + 0.5) / 24) * 100;
+                 const leftPercent = ((chunk.centroid.c + 0.5) / 6) * 100;
+
+                 return (
+                    <div key={i} className="absolute pointer-events-none z-10 flex items-center justify-center" style={{
+                       top: `${topPercent}%`,
+                       left: `${leftPercent}%`,
+                       transform: 'translate(-50%, -50%)',
+                       width: 'max-content'
+                    }}>
+                       <span className="text-sm sm:text-base font-black text-white text-center drop-shadow-md px-1" style={{textShadow: '0 2px 4px rgba(0,0,0,0.8)'}}>
                           {task.name}
-                        </span>
-                      )}
+                       </span>
                     </div>
                  )
               })}
@@ -355,7 +457,7 @@
           <div className="flex justify-between items-center bg-white p-4 rounded-xl shadow-sm border border-slate-100">
              <div>
                <h3 className="font-bold text-sm text-slate-700">플래너 작성</h3>
-               <p className="text-[11px] text-slate-400 mt-1">{isEditMode ? '원하는 항목을 누르고 표를 드래그하세요.' : '편집 모드를 켜서 일정을 추가하세요.'}</p>
+               <p className="text-[11px] text-slate-400 mt-1">{isEditMode ? '영역을 드래그해서 지정하세요.' : '편집 모드를 켜서 일정을 추가하세요.'}</p>
              </div>
              <button onClick={() => { setIsEditMode(!isEditMode); if(!isEditMode) { setActiveTask(null); setSelection([]); } }} className={`px-4 py-2 rounded-xl font-bold text-sm shadow-sm transition-all ${isEditMode ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
                {isEditMode ? '저장 및 편집 완료' : '✏️ 플래너 편집 모드'}
@@ -365,29 +467,41 @@
           {/* 편집 모드 패널 */}
           {isEditMode && (
             <div className="fade-in space-y-3">
+              <div className="flex gap-2">
+                <button onClick={() => navigateTo('routine')} className="flex-1 bg-emerald-50 text-emerald-700 py-3 rounded-xl font-bold border border-emerald-100 shadow-sm text-sm">🌅 아침 루틴 가기</button>
+                <button onClick={() => navigateTo('routine')} className="flex-1 bg-indigo-50 text-indigo-700 py-3 rounded-xl font-bold border border-indigo-100 shadow-sm text-sm">🌙 저녁 루틴 가기</button>
+              </div>
+
               <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100">
                 <div className="flex justify-between items-center mb-3">
                   <h3 className="font-bold text-sm text-slate-700">할 일 목록</h3>
-                  {selection.length > 0 && <span className="text-xs text-blue-500 font-bold bg-blue-50 px-2 py-1 rounded animate-pulse">{selection.length}칸 선택됨 (새 할 일을 만들어보세요!)</span>}
+                  {selection.length > 0 && <span className="text-xs text-blue-500 font-bold bg-blue-50 px-2 py-1 rounded animate-pulse">{selection.length}칸 영역 잡힘</span>}
                 </div>
                 
                 <div className="flex flex-wrap gap-2 mb-4 items-center">
-                  <button onClick={() => { setActiveTask('eraser'); setSelection([]); }} className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all border-2 ${activeTask === 'eraser' ? 'border-red-400 scale-105 bg-red-50 text-red-500' : 'border-slate-200 bg-white text-slate-500'}`}>
+                  <button onClick={() => handleAssignExistingTask('eraser')} className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all border-2 ${activeTask === 'eraser' ? 'border-red-400 scale-105 bg-red-50 text-red-500' : 'border-slate-200 bg-white text-slate-500'}`}>
                     🧹 지우개
                   </button>
 
-                  {data.tasks.map(t => (
-                    <div key={t.id} className={`flex items-center gap-1 pl-3 pr-1 py-1.5 rounded-full text-xs font-bold text-white transition-transform ${activeTask === t.id ? 'scale-105 ring-2 ring-offset-2 ring-blue-400' : 'opacity-80'}`} style={{backgroundColor: t.color}}>
-                      <span onClick={() => { setActiveTask(t.id); setSelection([]); }} className="cursor-pointer py-0.5">{t.name}</span>
-                      <button onClick={(e) => { e.stopPropagation(); handleDeleteTask(t.id); }} className="w-5 h-5 rounded-full bg-black/20 flex items-center justify-center hover:bg-black/40 text-[10px] leading-none">&times;</button>
+                  {activeTasksList.map(t => (
+                    <div key={t.id} className={`flex items-center gap-1 pl-3 pr-1 py-1.5 rounded-full text-xs font-bold text-white transition-transform border-2 ${activeTask === t.id ? 'border-slate-800 scale-105 shadow-md' : 'border-transparent opacity-90'}`} style={{backgroundColor: t.color}}>
+                      <span onClick={() => handleAssignExistingTask(t.id)} className="cursor-pointer py-0.5">{t.name}</span>
+                      <button onClick={(e) => { e.stopPropagation(); handleDeleteTask(t.id); }} className="w-5 h-5 rounded-full bg-black/20 flex items-center justify-center hover:bg-black/40 text-[10px] leading-none ml-1">&times;</button>
                     </div>
                   ))}
                 </div>
                 
-                <div className="flex gap-2 items-center pt-3 border-t border-slate-100">
-                  <input value={taskName} onChange={e=>setTaskName(e.target.value)} placeholder="새로운 할 일" className="flex-1 min-w-0 p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm outline-none" />
-                  <input type="color" value={taskColor} onChange={e=>setTaskColor(e.target.value)} className="w-12 h-10 shrink-0 p-0 border-0 rounded-lg cursor-pointer" />
-                  <button onClick={handleAddTask} className="px-4 h-10 shrink-0 bg-blue-600 text-white rounded-lg font-bold text-sm whitespace-nowrap shadow-sm">추가</button>
+                <div className="pt-3 border-t border-slate-100">
+                  <span className="text-xs font-bold text-slate-400 mb-2 block">새로운 할 일 색상 (위에서 영역을 잡고 고르세요)</span>
+                  <div className="flex flex-wrap gap-2 mb-3">
+                    {pastelPalette.map(c => (
+                      <button key={c} onClick={() => setTaskColor(c)} className={`w-8 h-8 rounded-full border-2 transition-transform ${taskColor === c ? 'border-slate-800 scale-110 shadow-md' : 'border-transparent'}`} style={{backgroundColor: c}}></button>
+                    ))}
+                  </div>
+                  <div className="flex gap-2 items-center">
+                    <input value={taskName} onChange={e=>setTaskName(e.target.value)} placeholder="할 일 이름 입력" className="flex-1 min-w-0 p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm outline-none" />
+                    <button onClick={handleAddAndAssign} className="px-4 py-2.5 shrink-0 bg-blue-600 text-white rounded-lg font-bold text-sm whitespace-nowrap shadow-sm">항목 추가 및 색칠</button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -403,8 +517,13 @@
             {renderGrid()}
           </div>
           
-          {isEditMode && (
-            <p className="text-xs text-center text-blue-500 font-bold mt-2">시간을 드래그한 후 할 일을 추가하거나, 목록을 누르고 색칠하세요!</p>
+          {isEditMode ? (
+            <div className="text-center mt-2 space-y-1">
+              <p className="text-xs text-blue-500 font-bold">1️⃣ 빈 칸을 주르륵 드래그해서 영역을 잡고, 아래에서 이름을 입력하세요.</p>
+              <p className="text-xs text-slate-500">2️⃣ 또는 지우개나 기존 항목을 먼저 누른 후 표를 문지르세요.</p>
+            </div>
+          ) : (
+            <p className="text-xs text-center text-slate-400 mt-2">플래너를 수정하려면 '편집 모드'를 켜주세요.</p>
           )}
         </div>
       );
@@ -640,7 +759,7 @@
                 ...c.records,
                 [selectedDay]: { completed: true, note: recordNote, date: recordDate }
               }
-            };
+            }
           }
           return c;
         });
@@ -902,7 +1021,7 @@
     };
 
     // ==========================================
-    // 메인 App & 홈 화면 (자동 마이그레이션 포함)
+    // 메인 App & 홈 화면
     // ==========================================
     const App = () => {
       const [currentView, setCurrentView] = useState('home');
