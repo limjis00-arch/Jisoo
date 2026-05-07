@@ -69,10 +69,13 @@
       return (
         <div className="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden mb-3">
           <div onClick={() => setIsOpen(!isOpen)} className="flex items-center justify-between p-4 bg-slate-50 hover:bg-slate-100 cursor-pointer">
-            <div className="font-bold text-slate-800 flex items-center gap-2">
-              {title} {rightElement && <div onClick={e => e.stopPropagation()}>{rightElement}</div>}
+            <div className="font-bold text-slate-800 flex items-center gap-2 flex-1">
+              {title}
             </div>
-            {isOpen ? <Icons.ChevronUp /> : <Icons.ChevronDown />}
+            <div className="flex items-center gap-2 ml-2">
+              {rightElement && <div onClick={e => e.stopPropagation()}>{rightElement}</div>}
+              {isOpen ? <Icons.ChevronUp /> : <Icons.ChevronDown />}
+            </div>
           </div>
           {isOpen && <div className="p-3">{children}</div>}
         </div>
@@ -159,14 +162,28 @@
     const PlannerApp = ({ data, updateData, navigateTo }) => {
       const [date, setDate] = useState(getTodayStr());
       const [activeTask, setActiveTask] = useState(null);
-      const [isDragging, setIsDragging] = useState(false);
+      const [isEditMode, setIsEditMode] = useState(false);
+      
       const [taskName, setTaskName] = useState('');
       const [taskColor, setTaskColor] = useState('#3b82f6');
       
       const currentDayRecords = data.records[date] || {};
 
+      const isDraggingRef = useRef(false);
+      const paintModeRef = useRef('paint'); 
+
+      useEffect(() => {
+        const handleUp = () => { isDraggingRef.current = false; };
+        window.addEventListener('pointerup', handleUp);
+        window.addEventListener('pointercancel', handleUp);
+        return () => {
+          window.removeEventListener('pointerup', handleUp);
+          window.removeEventListener('pointercancel', handleUp);
+        };
+      }, []);
+
       const handleAddTask = () => {
-        if(!taskName) return;
+        if(!taskName.trim()) return;
         const newTask = { id: generateId(), name: taskName, color: taskColor };
         updateData({ ...data, tasks: [...data.tasks, newTask] });
         setTaskName('');
@@ -178,24 +195,45 @@
         if(activeTask === taskId) setActiveTask(null);
       };
 
-      const paintBlock = (idx) => {
-        if (!activeTask) return;
+      const applyPaint = (idx, mode) => {
         const newRecords = { ...data.records };
         if (!newRecords[date]) newRecords[date] = {};
-        
-        if(newRecords[date][idx] === activeTask) {
-          delete newRecords[date][idx];
+        let changed = false;
+
+        if (mode === 'erase') {
+          if (newRecords[date][idx] === activeTask) {
+            delete newRecords[date][idx];
+            changed = true;
+          }
         } else {
-          newRecords[date][idx] = activeTask;
+          if (newRecords[date][idx] !== activeTask) {
+            newRecords[date][idx] = activeTask;
+            changed = true;
+          }
         }
-        updateData({ ...data, records: newRecords });
+        
+        if (changed) updateData({ ...data, records: newRecords });
+      };
+
+      const handlePointerDown = (e, idx) => {
+        if (!isEditMode || !activeTask) return;
+        e.target.releasePointerCapture(e.pointerId);
+        isDraggingRef.current = true;
+        
+        const isCurrentlyActive = (data.records[date] || {})[idx] === activeTask;
+        paintModeRef.current = isCurrentlyActive ? 'erase' : 'paint';
+        applyPaint(idx, paintModeRef.current);
+      };
+
+      const handlePointerEnter = (e, idx) => {
+        if (!isEditMode || !activeTask || !isDraggingRef.current) return;
+        applyPaint(idx, paintModeRef.current);
       };
 
       const renderGrid = () => {
         let grid = [];
         for (let h = 0; h < 24; h++) {
           
-          // 가로로 연속된 블록들을 하나로 묶기 (글씨를 덧씌우기 위함)
           let segments = [];
           let currentSegment = null;
           
@@ -205,12 +243,12 @@
             const task = data.tasks.find(t => t.id === taskId);
             
             if (!currentSegment) {
-              currentSegment = { task, span: 1 };
+              currentSegment = { task, span: 1, startM: m };
             } else if (currentSegment.task?.id === task?.id) {
               currentSegment.span++;
             } else {
               segments.push(currentSegment);
-              currentSegment = { task, span: 1 };
+              currentSegment = { task, span: 1, startM: m };
             }
           }
           if (currentSegment) segments.push(currentSegment);
@@ -222,37 +260,44 @@
               </div>
               <div className="flex-1 relative flex touch-none">
                 
-                {/* 뒤에 깔리는 클릭용 그리드 블록 (투명) */}
+                {/* 터치 감지용 보이지 않는 그리드 레이어 */}
                 {[0, 1, 2, 3, 4, 5].map(m => {
                   const idx = h * 6 + m;
                   return (
                     <div 
                       key={idx}
-                      onPointerDown={(e) => { e.target.releasePointerCapture(e.pointerId); setIsDragging(true); paintBlock(idx); }}
-                      onPointerEnter={() => { if(isDragging) paintBlock(idx); }}
-                      className="flex-1 h-6 border-r border-b border-slate-200 last:border-r-0 cursor-pointer bg-transparent"
+                      onPointerDown={(e) => handlePointerDown(e, idx)}
+                      onPointerEnter={(e) => handlePointerEnter(e, idx)}
+                      className={`flex-1 h-6 border-r border-b border-slate-200 last:border-r-0 transition-colors ${isEditMode && activeTask ? 'cursor-pointer' : ''} bg-transparent`}
                     ></div>
                   );
                 })}
                 
-                {/* 위에 덧씌워지는 색상 및 텍스트 레이어 (드래그 방해 안 함) */}
+                {/* 시각적으로 보여주는 색상 및 텍스트 레이어 */}
                 <div className="absolute inset-0 flex pointer-events-none">
-                  {segments.map((seg, i) => (
-                    <div 
-                      key={i} 
-                      style={{ flex: seg.span, backgroundColor: seg.task ? seg.task.color : 'transparent' }} 
-                      className={`flex items-center justify-center overflow-hidden border-b border-slate-200 ${seg.task ? 'shadow-inner' : ''}`}
-                    >
-                      {seg.task && <span className="text-[10px] text-white font-bold truncate px-1 drop-shadow-md">{seg.task.name}</span>}
-                    </div>
-                  ))}
+                  {segments.map((seg, i) => {
+                    const prevHourIdx = (h - 1) * 6 + seg.startM;
+                    const prevTaskId = h > 0 ? currentDayRecords[prevHourIdx] : null;
+                    // 위쪽 시간대의 같은 분(startM)에 동일한 항목이 색칠되어 있다면 텍스트 숨김 (맨 위에 한 번만 표시되도록)
+                    const showText = seg.task && prevTaskId !== seg.task.id;
+
+                    return (
+                      <div 
+                        key={i} 
+                        style={{ flex: seg.span, backgroundColor: seg.task ? seg.task.color : 'transparent' }} 
+                        className={`flex items-center justify-center overflow-hidden border-b border-slate-200 ${seg.task ? 'shadow-inner' : ''}`}
+                      >
+                        {showText && <span className="text-[10px] text-white font-bold truncate px-1 drop-shadow-md">{seg.task.name}</span>}
+                      </div>
+                    );
+                  })}
                 </div>
 
               </div>
             </div>
           );
         }
-        return <div className="border-t border-slate-200" onPointerUp={()=>setIsDragging(false)} onPointerLeave={()=>setIsDragging(false)}>{grid}</div>;
+        return <div className="border-t border-slate-200">{grid}</div>;
       };
 
       return (
@@ -268,27 +313,43 @@
             <button onClick={() => navigateTo('routine')} className="flex-1 bg-indigo-50 text-indigo-700 py-3 rounded-xl font-bold border border-indigo-200 shadow-sm text-sm">🌙 저녁 루틴 가기</button>
           </div>
 
+          {/* 할 일 항목 뷰/편집 패널 */}
           <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100">
-            <h3 className="font-bold mb-3 text-sm">할 일 항목</h3>
-            <div className="flex flex-wrap gap-2 mb-4">
+            <div className="flex justify-between items-center mb-3">
+               <h3 className="font-bold text-sm">할 일 항목</h3>
+               <button onClick={() => { setIsEditMode(!isEditMode); if(isEditMode) setActiveTask(null); }} className={`px-3 py-1.5 rounded-lg font-bold text-xs transition-colors ${isEditMode ? 'bg-blue-600 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
+                 {isEditMode ? '편집 완료' : '편집 모드'}
+               </button>
+            </div>
+
+            {data.tasks.length === 0 && !isEditMode && <p className="text-xs text-slate-400">편집 모드를 켜서 할 일을 추가해보세요.</p>}
+
+            <div className="flex flex-wrap gap-2 mb-2">
               {data.tasks.map(t => (
-                <div key={t.id} className={`flex items-center gap-1 pl-3 pr-1 py-1 rounded-full text-xs font-bold text-white transition-transform ${activeTask === t.id ? 'scale-110 ring-2 ring-offset-2 ring-blue-400' : 'opacity-80'}`} style={{backgroundColor: t.color}}>
-                  <span onClick={() => setActiveTask(t.id)} className="cursor-pointer py-1">{t.name}</span>
-                  <button onClick={(e) => { e.stopPropagation(); handleDeleteTask(t.id); }} className="w-5 h-5 rounded-full bg-black/20 flex items-center justify-center hover:bg-black/40 text-[10px] leading-none">&times;</button>
+                <div key={t.id} className={`flex items-center gap-1 pl-3 py-1 rounded-full text-xs font-bold text-white transition-transform ${isEditMode && activeTask === t.id ? 'scale-110 ring-2 ring-offset-2 ring-blue-400' : 'opacity-80'} ${!isEditMode ? 'pr-3' : 'pr-1'}`} style={{backgroundColor: t.color}}>
+                  <span onClick={() => isEditMode && setActiveTask(t.id)} className={`py-1 ${isEditMode ? 'cursor-pointer' : ''}`}>{t.name}</span>
+                  {isEditMode && <button onClick={(e) => { e.stopPropagation(); handleDeleteTask(t.id); }} className="w-5 h-5 rounded-full bg-black/20 flex items-center justify-center hover:bg-black/40 text-[10px] leading-none">&times;</button>}
                 </div>
               ))}
             </div>
-            <div className="flex gap-2">
-              <input value={taskName} onChange={e=>setTaskName(e.target.value)} placeholder="새로운 할 일" className="flex-1 p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm" />
-              <input type="color" value={taskColor} onChange={e=>setTaskColor(e.target.value)} className="w-16 h-10 p-0 border-0 rounded-lg cursor-pointer" />
-              <button onClick={handleAddTask} className="px-3 py-1.5 bg-blue-600 text-white rounded-lg font-bold text-xs">추가</button>
-            </div>
+            
+            {isEditMode && (
+              <div className="flex gap-2 items-center mt-3 pt-3 border-t border-slate-100">
+                <input value={taskName} onChange={e=>setTaskName(e.target.value)} placeholder="새로운 할 일" className="flex-1 min-w-0 p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm" />
+                <input type="color" value={taskColor} onChange={e=>setTaskColor(e.target.value)} className="w-16 h-10 shrink-0 p-0 border-0 rounded-lg cursor-pointer" />
+                <button onClick={handleAddTask} className="px-3 h-10 shrink-0 bg-blue-600 text-white rounded-lg font-bold text-xs whitespace-nowrap">추가</button>
+              </div>
+            )}
           </div>
 
-          <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden select-none touch-none">
+          <div className={`bg-white rounded-xl shadow-sm border overflow-hidden select-none touch-none ${isEditMode ? 'border-blue-300 ring-2 ring-blue-100' : 'border-slate-100'}`}>
             {renderGrid()}
           </div>
-          <p className="text-xs text-center text-slate-400 mt-2">* 원하는 색상을 누르고 표를 드래그하거나 터치하여 색칠하세요.</p>
+          {isEditMode ? (
+            <p className="text-xs text-center text-blue-500 font-bold mt-2">* 원하는 항목을 누르고 표를 드래그하여 색칠/지우기 하세요.</p>
+          ) : (
+            <p className="text-xs text-center text-slate-400 mt-2">* 편집 모드를 켜면 표에 일정을 색칠할 수 있습니다.</p>
+          )}
         </div>
       );
     };
@@ -333,20 +394,6 @@
         return { bunches: Math.floor(comp/100), current: comp%100 };
       };
 
-      let totalItemsCount = 0;
-      let completedCount = 0;
-      let restedCount = 0;
-      data.categories.forEach(cat => {
-         cat.items.forEach(item => {
-            totalItemsCount++;
-            const st = data.history[date]?.[item.id];
-            if(st === 'completed') completedCount++;
-            if(st === 'rest') restedCount++;
-         });
-      });
-      const activeTotal = totalItemsCount - restedCount;
-      const progressPercent = activeTotal === 0 ? 0 : Math.round((completedCount / activeTotal) * 100);
-
       const openAddCat = () => { setEditCatId(null); setCatName(''); setCatItems([{id: generateId(), name: ''}]); setIsModalOpen(true); };
       const openEditCat = (cat) => { setEditCatId(cat.id); setCatName(cat.name); setCatItems(cat.items.map(i=>({...i}))); setIsModalOpen(true); };
       
@@ -376,42 +423,55 @@
             <button onClick={() => setDate(addDays(date, 1))} className="p-2 text-slate-400">&gt;</button>
           </div>
 
-          <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 text-center">
-            <p className="text-sm font-bold text-slate-500 mb-1">오늘의 달성률</p>
-            <div className="text-4xl font-black text-emerald-500 mb-2">{progressPercent}%</div>
-            <div className="w-full bg-slate-100 rounded-full h-3 mb-1">
-              <div className="bg-emerald-500 h-3 rounded-full transition-all duration-500" style={{width: `${progressPercent}%`}}></div>
-            </div>
-            <p className="text-xs text-slate-400">완료 {completedCount} / 대상 {activeTotal} (휴식 {restedCount})</p>
-          </div>
-
           <button onClick={openAddCat} className="w-full py-4 bg-emerald-600 text-white rounded-xl font-bold flex justify-center gap-2 shadow-md"><Icons.Plus/> 새 루틴 추가하기</button>
 
           {data.categories.length === 0 && <p className="text-center text-slate-400 py-10">설정된 루틴이 없습니다.</p>}
 
-          {data.categories.map(cat => (
-            <Accordion key={cat.id} title={cat.name} rightElement={
-              <div className="flex gap-2">
-                <button onClick={() => openEditCat(cat)} className="text-xs bg-indigo-50 text-indigo-600 px-2 py-1 rounded shadow-sm font-bold">수정</button>
-                <button onClick={() => restAll(cat.id)} className="text-xs bg-orange-100 text-orange-600 px-2 py-1 rounded shadow-sm font-bold">전체 휴식</button>
-              </div>
-            }>
-              {cat.items.map(item => {
-                const status = data.history[date]?.[item.id];
-                const textStyle = status === 'completed' ? 'text-emerald-600 font-bold' : status === 'rest' ? 'line-through text-slate-400' : 'text-slate-700';
+          {data.categories.map(cat => {
+            let catTotal = cat.items.length;
+            let catDone = 0;
+            let catRest = 0;
+            cat.items.forEach(item => {
+               const st = data.history[date]?.[item.id];
+               if(st === 'completed') catDone++;
+               if(st === 'rest') catRest++;
+            });
+            const activeTotal = catTotal - catRest;
+            const catRate = activeTotal === 0 ? (catTotal === 0 ? 0 : 100) : Math.round((catDone / activeTotal) * 100);
 
-                return (
-                  <div key={item.id} className="flex justify-between items-center p-3 mb-2 bg-slate-50 rounded-xl border border-slate-100">
-                    <span className={`font-medium ${textStyle}`}>{item.name}</span>
-                    <div className="flex gap-1">
-                      <button onClick={() => toggleStatus(item.id, 'rest')} className={`p-2 rounded-lg ${status==='rest'?'bg-orange-200 text-orange-700':'bg-white text-slate-400'}`}><Icons.Rest/></button>
-                      <button onClick={() => toggleStatus(item.id, 'completed')} className={`p-2 rounded-lg ${status==='completed'?'bg-emerald-200 text-emerald-700':'bg-white text-slate-400'}`}><Icons.Check/></button>
-                    </div>
+            return (
+              <Accordion 
+                key={cat.id} 
+                title={
+                  <div className="flex items-center gap-2">
+                    {cat.name} 
+                    <span className="text-xs font-black text-emerald-500 bg-emerald-50 px-2 py-0.5 rounded-full">{catRate}%</span>
                   </div>
-                );
-              })}
-            </Accordion>
-          ))}
+                } 
+                rightElement={
+                  <div className="flex gap-2">
+                    <button onClick={() => openEditCat(cat)} className="text-xs bg-indigo-50 text-indigo-600 px-2 py-1 rounded shadow-sm font-bold">수정</button>
+                    <button onClick={() => restAll(cat.id)} className="text-xs bg-orange-100 text-orange-600 px-2 py-1 rounded shadow-sm font-bold">전체 휴식</button>
+                  </div>
+                }
+              >
+                {cat.items.map(item => {
+                  const status = data.history[date]?.[item.id];
+                  const textStyle = status === 'completed' ? 'text-emerald-600 font-bold' : status === 'rest' ? 'line-through text-slate-400' : 'text-slate-700';
+
+                  return (
+                    <div key={item.id} className="flex justify-between items-center p-3 mb-2 bg-slate-50 rounded-xl border border-slate-100">
+                      <span className={`font-medium ${textStyle}`}>{item.name}</span>
+                      <div className="flex gap-1">
+                        <button onClick={() => toggleStatus(item.id, 'rest')} className={`p-2 rounded-lg ${status==='rest'?'bg-orange-200 text-orange-700':'bg-white text-slate-400'}`}><Icons.Rest/></button>
+                        <button onClick={() => toggleStatus(item.id, 'completed')} className={`p-2 rounded-lg ${status==='completed'?'bg-emerald-200 text-emerald-700':'bg-white text-slate-400'}`}><Icons.Check/></button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </Accordion>
+            );
+          })}
 
           {data.categories.length > 0 && (
             <button onClick={() => setShowStats(!showStats)} className="w-full py-4 bg-purple-50 text-purple-700 font-bold rounded-xl border border-purple-100 mt-6 shadow-sm flex items-center justify-center gap-2">
@@ -459,7 +519,7 @@
                   {catItems.map((item, idx) => (
                     <div key={idx} className="flex gap-2">
                       <input value={item.name} onChange={e=>{const newItems=[...catItems]; newItems[idx].name=e.target.value; setCatItems(newItems);}} placeholder="예) 물 한잔 마시기" className="flex-1 p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm outline-none"/>
-                      <button onClick={()=>setCatItems(catItems.filter((_, i)=>i!==idx))} className="p-2 bg-red-50 text-red-400 rounded-lg"><Icons.Trash/></button>
+                      <button onClick={()=>setCatItems(catItems.filter((_, i)=>i!==idx))} className="p-2 bg-red-50 text-red-400 rounded-lg shrink-0"><Icons.Trash/></button>
                     </div>
                   ))}
                   <button onClick={()=>setCatItems([...catItems, {id: generateId(), name: ''}])} className="w-full py-2 bg-slate-100 text-slate-600 rounded-lg text-sm font-bold mt-2">항목 추가 +</button>
@@ -563,7 +623,6 @@
                 <button key={i} onClick={() => openRecordModal(c.id, i)} className={`aspect-square rounded-full flex flex-col items-center justify-center transition-transform active:scale-95 shadow-sm overflow-hidden p-0.5 ${isCompleted ? 'bg-gradient-to-br from-purple-500 to-purple-700 text-white' : 'bg-white text-slate-400 border border-slate-200'}`}>
                   <span className="font-bold text-[10px] md:text-xs leading-none">{i}</span>
                   {record?.note && <span className="text-[8px] font-normal opacity-80 truncate w-full text-center mt-0.5">{record.note}</span>}
-                  {record?.date && <span className="text-[7px] font-normal opacity-60 mt-0.5">{shortDate(record.date)}</span>}
                 </button>
               );
             }
