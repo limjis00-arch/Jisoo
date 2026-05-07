@@ -175,15 +175,15 @@
     };
 
     // ==========================================
-    // 2. 데일리 플래너 (10 Min Planner) - 최신 수정본
+    // 2. 데일리 플래너 (10 Min Planner) - 글씨 없이 색깔만!
     // ==========================================
     const PlannerApp = ({ data, updateData, navigateTo }) => {
       const [date, setDate] = useState(getTodayStr());
       const [isEditMode, setIsEditMode] = useState(false);
       
-      const [selection, setSelection] = useState([]); // 드래그 중인 덩어리(인덱스 배열)
+      const [selection, setSelection] = useState([]); // 드래그 중인 임시 회색 영역
       const [taskName, setTaskName] = useState('');
-      const [taskColor, setTaskColor] = useState('#93c5fd'); // 기본 파스텔 블루
+      const [taskColor, setTaskColor] = useState('#93c5fd');
       
       const pastelPalette = [
         '#fca5a5', '#fdba74', '#fcd34d', '#86efac', 
@@ -191,9 +191,8 @@
       ];
 
       const currentDayRecords = data.records[date] || {};
-
       const isDraggingRef = useRef(false);
-      const dragModeRef = useRef(null); // 'select' (회색 칠하기) or 'erase' (지우기)
+      const dragModeRef = useRef(null); // 'select' (빈칸 칠하기) or 'erase' (색칠된칸 지우기)
 
       useEffect(() => {
         const handleUp = () => { isDraggingRef.current = false; dragModeRef.current = null; };
@@ -221,7 +220,6 @@
 
       const processDrag = (idx, mode) => {
         if (mode === 'select') {
-          // 이미 칠해진 곳은 덮어씌울 수 있도록 지우지 않음. selection에 추가만 함
           setSelection(prev => {
             if (!prev.includes(idx)) return [...prev, idx];
             return prev;
@@ -240,7 +238,6 @@
         if (e.target.releasePointerCapture && e.pointerId) e.target.releasePointerCapture(e.pointerId);
         isDraggingRef.current = true;
         
-        // 클릭한 곳에 이미 일정이 있다면 '지우기' 모드, 아니면 '선택(회색)' 모드
         if (currentDayRecords[idx]) {
           dragModeRef.current = 'erase';
           processDrag(idx, 'erase');
@@ -290,54 +287,6 @@
         });
       };
 
-      // 덩어리를 묶고, 완벽한 전체 중앙(Bounding Box Center) 좌표를 찾는 로직
-      const chunks = useMemo(() => {
-        const result = [];
-        const visited = new Set();
-        
-        for (let i = 0; i < 144; i++) {
-          const taskId = currentDayRecords[i];
-          if (taskId && !visited.has(i)) {
-            const cells = [];
-            const q = [i];
-            visited.add(i);
-            
-            while(q.length > 0) {
-              const curr = q.shift();
-              cells.push(curr);
-              const ch = Math.floor(curr/6);
-              const cm = curr%6;
-              const neighbors = [];
-              if (ch > 0) neighbors.push((ch-1)*6 + cm);
-              if (ch < 23) neighbors.push((ch+1)*6 + cm);
-              if (cm > 0) neighbors.push(ch*6 + (cm-1));
-              if (cm < 5) neighbors.push(ch*6 + (cm+1));
-              
-              for (let n of neighbors) {
-                if (!visited.has(n) && currentDayRecords[n] === taskId) {
-                  visited.add(n);
-                  q.push(n);
-                }
-              }
-            }
-            
-            // 덩어리의 가장 바깥쪽 모서리를 찾아 전체 정중앙 좌표 계산
-            let minH = 24, maxH = -1, minM = 6, maxM = -1;
-            cells.forEach(idx => {
-              const h = Math.floor(idx / 6);
-              const m = idx % 6;
-              if (h < minH) minH = h;
-              if (h > maxH) maxH = h;
-              if (m < minM) minM = m;
-              if (m > maxM) maxM = m;
-            });
-            
-            result.push({ taskId, minH, maxH, minM, maxM });
-          }
-        }
-        return result;
-      }, [currentDayRecords]);
-
       const activeTasksList = data.tasks.filter(t => !t.isArchived);
 
       const renderGrid = () => {
@@ -352,12 +301,11 @@
             </div>
             
             <div 
-              className={`flex-1 relative bg-white ${isEditMode ? 'touch-none' : ''}`} 
+              className={`flex-1 bg-white ${isEditMode ? 'touch-none' : ''}`} 
               style={{ display: 'grid', gridTemplateRows: 'repeat(24, 1.75rem)', gridTemplateColumns: 'repeat(6, 1fr)' }}
               onTouchMove={handlePointerMove}
               onPointerMove={handlePointerMove}
             >
-              {/* 셀 배경색 그리기 */}
               {Array.from({length:144}).map((_, idx) => {
                  const taskId = currentDayRecords[idx];
                  const task = data.tasks.find(t => t.id === taskId);
@@ -368,32 +316,9 @@
                       key={idx}
                       data-idx={idx}
                       onPointerDown={(e) => handlePointerDown(e, idx)}
-                      className={`border-r border-b border-slate-200 transition-colors relative ${isEditMode ? 'cursor-pointer' : ''}`}
-                      style={{ backgroundColor: task ? task.color : (isSelected ? '#cbd5e1' : 'transparent') }} // 선택 시 회색(slate-300)
+                      className={`border-r border-b border-slate-200 transition-colors ${isEditMode ? 'cursor-pointer' : ''} ${task ? 'shadow-inner' : ''}`}
+                      style={{ backgroundColor: task ? task.color : (isSelected ? '#cbd5e1' : 'transparent') }}
                     ></div>
-                 )
-              })}
-              
-              {/* 글씨 오버레이 (절대 겹치지 않게 정중앙에 띄움) */}
-              {chunks.map((chunk, i) => {
-                 const task = data.tasks.find(t => t.id === chunk.taskId);
-                 if (!task) return null; // 만약 데이터를 못 찾으면 패스
-                 
-                 // 덩어리의 가로/세로 전체를 포함하는 박스의 정중앙 좌표 계산 (퍼센트)
-                 const topPercent = ((chunk.minH + chunk.maxH + 1) / 48) * 100;
-                 const leftPercent = ((chunk.minM + chunk.maxM + 1) / 12) * 100;
-
-                 return (
-                    <div key={i} className="absolute pointer-events-none z-10 flex items-center justify-center" style={{
-                       top: `${topPercent}%`,
-                       left: `${leftPercent}%`,
-                       transform: 'translate(-50%, -50%)',
-                       width: 'max-content'
-                    }}>
-                       <span className="text-sm sm:text-base font-black text-white text-center drop-shadow-md px-1 tracking-wide" style={{textShadow: '0 2px 5px rgba(0,0,0,0.8)'}}>
-                          {task.name}
-                       </span>
-                    </div>
                  )
               })}
             </div>
@@ -418,6 +343,18 @@
                {isEditMode ? '저장 및 편집 완료' : '✏️ 플래너 편집 모드'}
              </button>
           </div>
+
+          {/* 항목표 (범례) - 평소 모드에서도 활성화된 할 일 목록을 보여줍니다 */}
+          {!isEditMode && activeTasksList.length > 0 && (
+            <div className="bg-white p-3 rounded-xl shadow-sm border border-slate-100 flex flex-wrap gap-2 fade-in">
+              <span className="w-full text-xs font-bold text-slate-400 mb-1">나의 할 일 목록</span>
+              {activeTasksList.map(t => (
+                <div key={t.id} className="px-3 py-1 rounded-full text-xs font-bold text-white shadow-sm" style={{backgroundColor: t.color}}>
+                  {t.name}
+                </div>
+              ))}
+            </div>
+          )}
 
           {/* 편집 모드 패널 (영역 지정 -> 색상/이름 설정) */}
           {isEditMode && (
