@@ -148,7 +148,6 @@
                   <button onClick={()=>{if(tagInput) { setSelectedTags([...new Set([...selectedTags, tagInput])]); setTagInput(''); }}} className="px-3 py-2 bg-slate-200 text-slate-700 rounded-lg text-sm font-bold hover:bg-slate-300">추가</button>
                 </div>
 
-                {/* 기존 태그 선택 영역 */}
                 {availableTags.length > 0 && (
                   <div className="mb-4">
                     <span className="text-xs font-bold text-slate-500 block mb-1">기존 태그 간편 선택</span>
@@ -183,13 +182,7 @@
       const [isEditMode, setIsEditMode] = useState(false);
       
       const [taskName, setTaskName] = useState('');
-      const [taskColor, setTaskColor] = useState('#818cf8'); // 기본색 세팅
-      
-      // 예쁜 파스텔 팔레트 제공
-      const pastelPalette = [
-        '#fca5a5', '#fdba74', '#fcd34d', '#86efac', 
-        '#93c5fd', '#c4b5fd', '#f472b6', '#cbd5e1'
-      ];
+      const [taskColor, setTaskColor] = useState('#3b82f6');
       
       const currentDayRecords = data.records[date] || {};
 
@@ -254,28 +247,41 @@
         applyPaint(idx, paintModeRef.current);
       };
 
-      // 연속된 블록들을 찾아 중앙 좌표를 계산하는 로직 (글자 하나만 예쁘게 띄우기 위함)
-      const getSequences = () => {
-        const seqs = [];
-        let curr = null;
-        for (let i = 0; i < 144; i++) {
-          const taskId = currentDayRecords[i];
-          if (taskId) {
-            if (curr && curr.taskId === taskId) {
-              curr.cells.push(i);
-            } else {
-              if (curr) seqs.push(curr);
-              curr = { taskId, cells: [i] };
+      // 연속된 블록들을 찾아 중앙에 글씨를 한 번만 그리기 위한 컴포넌트 계산
+      const getComponents = () => {
+        const components = [];
+        const visited = new Set();
+        for (let idx = 0; idx < 144; idx++) {
+          const taskId = currentDayRecords[idx];
+          if (taskId && !visited.has(idx)) {
+            const comp = { taskId, cells: [] };
+            const q = [idx];
+            visited.add(idx);
+            while(q.length > 0) {
+              const curr = q.shift();
+              comp.cells.push(curr);
+              const ch = Math.floor(curr/6);
+              const cm = curr%6;
+              const neighbors = [];
+              if (ch > 0) neighbors.push((ch-1)*6 + cm);
+              if (ch < 23) neighbors.push((ch+1)*6 + cm);
+              if (cm > 0) neighbors.push(ch*6 + (cm-1));
+              if (cm < 5) neighbors.push(ch*6 + (cm+1));
+              
+              for(let n of neighbors) {
+                if(!visited.has(n) && currentDayRecords[n] === taskId) {
+                  visited.add(n);
+                  q.push(n);
+                }
+              }
             }
-          } else {
-            if (curr) { seqs.push(curr); curr = null; }
+            components.push(comp);
           }
         }
-        if (curr) seqs.push(curr);
-        return seqs;
+        return components;
       };
 
-      const sequences = useMemo(() => getSequences(), [currentDayRecords]);
+      const components = useMemo(() => getComponents(), [currentDayRecords]);
 
       const renderGrid = () => {
         return (
@@ -290,28 +296,47 @@
             
             <div className={`flex-1 relative bg-white ${isEditMode ? 'touch-none' : ''}`} style={{ display: 'grid', gridTemplateRows: 'repeat(24, 1.75rem)', gridTemplateColumns: 'repeat(6, 1fr)' }}>
               
-              {/* 셀별 배경색 및 이벤트 영역 */}
+              {/* 타일별 배경색 및 터치 감지 */}
               {Array.from({length:144}).map((_, idx) => {
                  const taskId = currentDayRecords[idx];
                  const task = data.tasks.find(t => t.id === taskId);
-                 
-                 // 현재 렌더링하는 칸이 연속된 그룹의 정중앙인지 확인하여 텍스트 렌더링
-                 const isCenter = sequences.some(seq => seq.taskId === taskId && seq.cells[Math.floor(seq.cells.length / 2)] === idx);
-
                  return (
                     <div 
                       key={idx}
                       onPointerDown={(e) => handlePointerDown(e, idx)}
                       onPointerEnter={(e) => handlePointerEnter(e, idx)}
-                      className={`border-r border-b border-slate-200 transition-colors flex items-center justify-center relative ${isEditMode && activeTask ? 'cursor-pointer' : ''}`}
+                      className={`border-r border-b border-slate-200 transition-colors ${isEditMode && activeTask ? 'cursor-pointer' : ''} ${task ? 'shadow-inner' : ''}`}
                       style={{ backgroundColor: task ? task.color : 'transparent' }}
-                    >
-                      {/* 정중앙 칸일 때만 글자를 띄움 (칸을 벗어나도 예쁘게 보이도록 whitespace-nowrap 적용) */}
-                      {isCenter && task && (
-                         <span className="absolute z-10 pointer-events-none text-white font-black whitespace-nowrap text-sm sm:text-base" style={{textShadow: '0 1px 3px rgba(0,0,0,0.6)'}}>
-                           {task.name}
-                         </span>
-                      )}
+                    ></div>
+                 )
+              })}
+              
+              {/* 무게중심을 이용해 글자를 완벽하게 한가운데 배치 */}
+              {components.map((comp, i) => {
+                 const task = data.tasks.find(t => t.id === comp.taskId);
+                 if (!task) return null;
+                 
+                 let sumH = 0, sumM = 0;
+                 comp.cells.forEach(c => {
+                   sumH += Math.floor(c / 6);
+                   sumM += c % 6;
+                 });
+                 const avgH = sumH / comp.cells.length;
+                 const avgM = sumM / comp.cells.length;
+
+                 const topPercent = ((avgH + 0.5) / 24) * 100;
+                 const leftPercent = ((avgM + 0.5) / 6) * 100;
+
+                 return (
+                    <div key={i} className="absolute pointer-events-none z-10 flex items-center justify-center" style={{
+                       top: `${topPercent}%`,
+                       left: `${leftPercent}%`,
+                       transform: 'translate(-50%, -50%)',
+                       width: 'max-content'
+                    }}>
+                       <span className="text-sm sm:text-base font-black text-white text-center drop-shadow-md px-1" style={{textShadow: '0 2px 4px rgba(0,0,0,0.8)'}}>
+                          {task.name}
+                       </span>
                     </div>
                  )
               })}
@@ -331,7 +356,7 @@
           <div className="flex justify-between items-center bg-white p-4 rounded-xl shadow-sm border border-slate-100">
              <div>
                <h3 className="font-bold text-sm text-slate-700">플래너 작성</h3>
-               <p className="text-xs text-slate-400 mt-1">{isEditMode ? '원하는 항목을 누르고 표를 드래그하세요.' : '편집 모드를 켜서 일정을 기록하세요.'}</p>
+               <p className="text-xs text-slate-400 mt-1">{isEditMode ? '원하는 색을 누르고 표를 드래그하세요.' : '편집 모드를 켜서 일정을 추가하세요.'}</p>
              </div>
              <button onClick={() => { setIsEditMode(!isEditMode); if(isEditMode) setActiveTask(null); }} className={`px-4 py-2 rounded-xl font-bold text-sm shadow-sm transition-all ${isEditMode ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
                {isEditMode ? '저장 및 편집 완료' : '✏️ 플래너 편집 모드'}
@@ -362,22 +387,15 @@
                   </div>
                 )}
                 
-                <div className="pt-3 border-t border-slate-100">
-                  <div className="flex flex-wrap gap-2 mb-3">
-                    {pastelPalette.map(c => (
-                      <button key={c} onClick={() => setTaskColor(c)} className={`w-8 h-8 rounded-full border-2 transition-transform ${taskColor === c ? 'border-slate-800 scale-110' : 'border-transparent'}`} style={{backgroundColor: c}}></button>
-                    ))}
-                  </div>
-                  <div className="flex gap-2 items-center">
-                    <input value={taskName} onChange={e=>setTaskName(e.target.value)} placeholder="할 일 이름 입력" className="flex-1 min-w-0 p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm outline-none" />
-                    <button onClick={handleAddTask} className="px-4 py-2.5 shrink-0 bg-blue-600 text-white rounded-lg font-bold text-sm whitespace-nowrap shadow-sm">항목 추가</button>
-                  </div>
+                <div className="flex gap-2 items-center pt-3 border-t border-slate-100">
+                  <input value={taskName} onChange={e=>setTaskName(e.target.value)} placeholder="새로운 할 일" className="flex-1 min-w-0 p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm outline-none" />
+                  <input type="color" value={taskColor} onChange={e=>setTaskColor(e.target.value)} className="w-12 h-10 shrink-0 p-0 border-0 rounded-lg cursor-pointer" />
+                  <button onClick={handleAddTask} className="px-4 h-10 shrink-0 bg-blue-600 text-white rounded-lg font-bold text-sm whitespace-nowrap">추가</button>
                 </div>
               </div>
             </div>
           )}
 
-          {/* 플래너 시간표 본체 */}
           <div className={`bg-white rounded-xl shadow-sm overflow-hidden select-none transition-all ${isEditMode ? 'border-2 border-blue-400 ring-4 ring-blue-50' : 'border border-slate-200'}`}>
             <div className="flex bg-slate-100 border-b border-slate-200">
                <div className="w-10 sm:w-12 shrink-0"></div>
@@ -688,19 +706,21 @@
             );
           })}
 
+          {/* 챌린지 추가/수정 모달 */}
           {isAddModalOpen && (
             <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
               <div className="bg-white rounded-2xl p-5 w-full max-w-sm">
                 <h3 className="font-bold text-lg mb-4">{editChallengeId ? '챌린지 제목 수정' : '새 챌린지 추가'}</h3>
                 <input value={newTitle} onChange={e=>setNewTitle(e.target.value)} placeholder="예) 매일 3km 러닝하기" className="w-full p-3 bg-slate-50 rounded-lg mb-4 border border-slate-200"/>
                 <div className="flex gap-2">
-                  <button onClick={()=>setIsAddModalOpen(false)} className="flex-1 py-3 bg-slate-100 rounded-xl font-bold text-slate-600">취소</button>
+                  <button onClick={()=>setIsAddModalOpen(false)} className="flex-1 py-3 bg-slate-100 rounded-xl font-bold">취소</button>
                   <button onClick={handleSaveChallenge} className="flex-1 py-3 bg-purple-600 text-white rounded-xl font-bold">저장</button>
                 </div>
               </div>
             </div>
           )}
 
+          {/* 상세 기록 모달 */}
           {isRecordModalOpen && (
             <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
               <div className="bg-white rounded-2xl p-5 w-full max-w-sm">
@@ -776,7 +796,7 @@
               )}
               <textarea value={note} onChange={e=>setNote(e.target.value)} placeholder="추가 일정이나 메모를 적어주세요." className="w-full p-3 bg-slate-50 rounded-lg mb-4 border border-slate-200 h-24"></textarea>
               <div className="flex gap-2">
-                <button onClick={()=>setSelectedDate(null)} className="flex-1 py-3 bg-slate-100 rounded-xl font-bold text-slate-600">닫기</button>
+                <button onClick={()=>setSelectedDate(null)} className="flex-1 py-3 bg-slate-100 rounded-xl font-bold">닫기</button>
                 <button onClick={()=>handleSave(selectedDate, shift, note)} className={`flex-1 py-3 ${colors.main} text-white rounded-xl font-bold`}>저장</button>
               </div>
             </div>
