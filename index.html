@@ -1,0 +1,704 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>지수의 올인원 다이어리</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <style>
+    body { -webkit-tap-highlight-color: transparent; background-color: #f8fafc; font-family: 'Pretendard', sans-serif; }
+    .pb-safe { padding-bottom: env(safe-area-inset-bottom); }
+    .hide-scrollbar::-webkit-scrollbar { display: none; }
+    .touch-none { touch-action: none; }
+    .fade-in { animation: fadeIn 0.3s ease-in-out; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+  </style>
+</head>
+<body class="text-slate-800 selection:bg-purple-200">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useMemo } = React;
+
+    // --- 기본 유틸리티 ---
+    const generateId = () => Math.random().toString(36).substr(2, 9);
+    const getTodayStr = () => {
+      const d = new Date();
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    };
+    const addDays = (dateStr, days) => {
+      const [y, m, d] = dateStr.split('-');
+      const date = new Date(y, m - 1, d);
+      date.setDate(date.getDate() + days);
+      return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    };
+
+    // --- 아이콘 ---
+    const Icons = {
+      Home: () => <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>,
+      Back: () => <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7"/></svg>,
+      Plus: () => <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4"/></svg>,
+      Trash: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>,
+      Check: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"/></svg>,
+      Rest: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 16h2m-2-4h2m-2-4h2m4 12v-8a4 4 0 00-4-4H9a4 4 0 00-4 4v8"/></svg>,
+      Download: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>,
+      Upload: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>,
+      ChevronDown: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"/></svg>,
+      ChevronUp: () => <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 15l7-7 7 7"/></svg>
+    };
+
+    // --- 전역 초기 데이터 ---
+    const defaultData = {
+      manual: { items: [], tags: [] },
+      planner: { tasks: [], records: {} },
+      routine: { categories: [], history: {} },
+      grape: { challenges: [] },
+      genie: { records: {} },
+      longie: { records: {} }
+    };
+
+    // --- 아코디언 컴포넌트 ---
+    const Accordion = ({ title, children, rightElement }) => {
+      const [isOpen, setIsOpen] = useState(true);
+      return (
+        <div className="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden mb-3">
+          <div onClick={() => setIsOpen(!isOpen)} className="flex items-center justify-between p-4 bg-slate-50 hover:bg-slate-100 cursor-pointer">
+            <div className="font-bold text-slate-800 flex items-center gap-2">
+              {title} {rightElement && <div onClick={e => e.stopPropagation()}>{rightElement}</div>}
+            </div>
+            {isOpen ? <Icons.ChevronUp /> : <Icons.ChevronDown />}
+          </div>
+          {isOpen && <div className="p-3">{children}</div>}
+        </div>
+      );
+    };
+
+    // ==========================================
+    // 1. 나 사용법 (Manual)
+    // ==========================================
+    const ManualApp = ({ data, updateData }) => {
+      const [isOpen, setIsOpen] = useState(false);
+      const [editId, setEditId] = useState(null);
+      const [title, setTitle] = useState('');
+      const [content, setContent] = useState('');
+      const [tagInput, setTagInput] = useState('');
+      const [selectedTags, setSelectedTags] = useState([]);
+      const [filterTag, setFilterTag] = useState(null);
+
+      const handleSave = () => {
+        if (!title.trim()) return;
+        const newItem = { id: editId || generateId(), title, content, tags: selectedTags };
+        const newItems = editId ? data.items.map(i => i.id === editId ? newItem : i) : [newItem, ...data.items];
+        updateData({ ...data, items: newItems });
+        setIsOpen(false);
+      };
+
+      const openEdit = (item) => { setEditId(item.id); setTitle(item.title); setContent(item.content); setSelectedTags(item.tags || []); setIsOpen(true); };
+      const openAdd = () => { setEditId(null); setTitle(''); setContent(''); setSelectedTags([]); setIsOpen(true); };
+      
+      const allTags = [...new Set(data.items.flatMap(i => i.tags || []))];
+      const filteredItems = filterTag ? data.items.filter(i => (i.tags || []).includes(filterTag)) : data.items;
+
+      return (
+        <div className="fade-in space-y-4">
+          <div className="flex gap-2 overflow-x-auto hide-scrollbar pb-2">
+            <button onClick={() => setFilterTag(null)} className={`px-4 py-1.5 rounded-full whitespace-nowrap text-sm font-bold ${!filterTag ? 'bg-indigo-600 text-white' : 'bg-white text-slate-500 border border-slate-200'}`}>전체</button>
+            {allTags.map(tag => (
+              <button key={tag} onClick={() => setFilterTag(tag)} className={`px-4 py-1.5 rounded-full whitespace-nowrap text-sm font-bold ${filterTag === tag ? 'bg-indigo-600 text-white' : 'bg-white text-slate-500 border border-slate-200'}`}>#{tag}</button>
+            ))}
+          </div>
+
+          {filteredItems.map(item => (
+            <Accordion key={item.id} title={item.title} rightElement={
+              <button onClick={() => updateData({...data, items: data.items.filter(i=>i.id!==item.id)})} className="p-1 text-red-400 bg-red-50 rounded"><Icons.Trash/></button>
+            }>
+              <div className="text-slate-600 whitespace-pre-wrap text-sm mb-3" onClick={() => openEdit(item)}>{item.content || '내용이 없습니다.'}</div>
+              <div className="flex gap-1 flex-wrap">
+                {(item.tags || []).map(t => <span key={t} className="text-xs bg-indigo-50 text-indigo-600 px-2 py-1 rounded">#{t}</span>)}
+              </div>
+            </Accordion>
+          ))}
+
+          <button onClick={openAdd} className="w-full py-4 bg-indigo-600 text-white rounded-xl font-bold flex items-center justify-center gap-2 shadow-md"><Icons.Plus /> 원칙/교훈 추가하기</button>
+
+          {isOpen && (
+            <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl p-5 w-full max-w-sm">
+                <h3 className="font-bold text-lg mb-4">{editId ? '수정하기' : '새 항목 추가'}</h3>
+                <input placeholder="대제목 (예: 돈을 쓸 때 원칙)" value={title} onChange={e=>setTitle(e.target.value)} className="w-full p-3 bg-slate-50 rounded-lg mb-3 border border-slate-200"/>
+                <textarea placeholder="상세 내용" value={content} onChange={e=>setContent(e.target.value)} className="w-full p-3 bg-slate-50 rounded-lg mb-3 h-32 border border-slate-200"></textarea>
+                <div className="flex gap-2 mb-3">
+                  <input placeholder="태그 입력 후 추가" value={tagInput} onChange={e=>setTagInput(e.target.value)} onKeyDown={e=>{if(e.key==='Enter' && tagInput) { setSelectedTags([...new Set([...selectedTags, tagInput])]); setTagInput(''); }}} className="flex-1 p-3 bg-slate-50 rounded-lg border border-slate-200"/>
+                  <button onClick={()=>{if(tagInput) { setSelectedTags([...new Set([...selectedTags, tagInput])]); setTagInput(''); }}} className="px-4 bg-slate-200 rounded-lg font-bold">추가</button>
+                </div>
+                <div className="flex flex-wrap gap-1 mb-4">
+                  {selectedTags.map(t => <span key={t} onClick={()=>setSelectedTags(selectedTags.filter(st=>st!==t))} className="bg-indigo-100 text-indigo-700 px-2 py-1 rounded text-sm cursor-pointer">#{t} &times;</span>)}
+                </div>
+                <div className="flex gap-2"><button onClick={()=>setIsOpen(false)} className="flex-1 py-3 bg-slate-100 rounded-xl font-bold">취소</button><button onClick={handleSave} className="flex-1 py-3 bg-indigo-600 text-white rounded-xl font-bold">저장</button></div>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    };
+
+    // ==========================================
+    // 2. 데일리 플래너 (10 Min Planner)
+    // ==========================================
+    const PlannerApp = ({ data, updateData, navigateTo }) => {
+      const [date, setDate] = useState(getTodayStr());
+      const [activeTask, setActiveTask] = useState(null);
+      const [isDragging, setIsDragging] = useState(false);
+      const [taskName, setTaskName] = useState('');
+      const [taskColor, setTaskColor] = useState('#3b82f6');
+      
+      const currentDayRecords = data.records[date] || {};
+
+      const handleAddTask = () => {
+        if(!taskName) return;
+        const newTask = { id: generateId(), name: taskName, color: taskColor };
+        updateData({ ...data, tasks: [...data.tasks, newTask] });
+        setTaskName('');
+        setActiveTask(newTask.id);
+      };
+
+      const paintBlock = (idx) => {
+        if (!activeTask) return;
+        const newRecords = { ...data.records };
+        if (!newRecords[date]) newRecords[date] = {};
+        
+        if(newRecords[date][idx] === activeTask) {
+          delete newRecords[date][idx];
+        } else {
+          newRecords[date][idx] = activeTask;
+        }
+        updateData({ ...data, records: newRecords });
+      };
+
+      const renderGrid = () => {
+        let grid = [];
+        for (let h = 0; h < 24; h++) {
+          let row = [];
+          for (let m = 0; m < 6; m++) {
+            const idx = h * 6 + m;
+            const taskId = currentDayRecords[idx];
+            const task = data.tasks.find(t => t.id === taskId);
+            row.push(
+              <div 
+                key={idx}
+                onPointerDown={(e) => { e.target.releasePointerCapture(e.pointerId); setIsDragging(true); paintBlock(idx); }}
+                onPointerEnter={() => { if(isDragging) paintBlock(idx); }}
+                className="flex-1 h-6 border-r border-b border-slate-200 last:border-r-0 cursor-pointer transition-colors"
+                style={{ backgroundColor: task ? task.color : 'white' }}
+              ></div>
+            );
+          }
+          grid.push(
+            <div key={h} className="flex border-l border-slate-200">
+              <div className="w-12 h-6 border-b border-slate-200 bg-slate-50 flex items-center justify-center text-[10px] font-bold text-slate-400">
+                {String(h).padStart(2, '0')}
+              </div>
+              <div className="flex-1 flex touch-none">{row}</div>
+            </div>
+          );
+        }
+        return <div className="border-t border-slate-200" onPointerUp={()=>setIsDragging(false)} onPointerLeave={()=>setIsDragging(false)}>{grid}</div>;
+      };
+
+      return (
+        <div className="fade-in space-y-4 pb-10">
+          <div className="flex justify-between items-center bg-white p-3 rounded-xl shadow-sm border border-slate-100">
+            <button onClick={() => setDate(addDays(date, -1))} className="p-2 text-slate-400">&lt;</button>
+            <span className="font-bold text-lg text-blue-600">{date} 플래너</span>
+            <button onClick={() => setDate(addDays(date, 1))} className="p-2 text-slate-400">&gt;</button>
+          </div>
+
+          <div className="flex gap-2">
+            <button onClick={() => navigateTo('routine')} className="flex-1 bg-green-50 text-green-700 py-3 rounded-xl font-bold border border-green-200 shadow-sm text-sm">🌅 아침 루틴 가기</button>
+            <button onClick={() => navigateTo('routine')} className="flex-1 bg-indigo-50 text-indigo-700 py-3 rounded-xl font-bold border border-indigo-200 shadow-sm text-sm">🌙 저녁 루틴 가기</button>
+          </div>
+
+          <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100">
+            <h3 className="font-bold mb-3 text-sm">할 일 항목 (색칠할 펜 선택)</h3>
+            <div className="flex flex-wrap gap-2 mb-4">
+              {data.tasks.map(t => (
+                <button key={t.id} onClick={() => setActiveTask(t.id)} className={`px-3 py-1.5 rounded-full text-xs font-bold text-white transition-transform ${activeTask === t.id ? 'scale-110 ring-2 ring-offset-2 ring-blue-400' : 'opacity-80'}`} style={{backgroundColor: t.color}}>
+                  {t.name}
+                </button>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <input value={taskName} onChange={e=>setTaskName(e.target.value)} placeholder="새로운 할 일" className="flex-1 p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm" />
+              <input type="color" value={taskColor} onChange={e=>setTaskColor(e.target.value)} className="w-10 h-10 p-0 border-0 rounded-lg" />
+              <button onClick={handleAddTask} className="px-4 bg-blue-600 text-white rounded-lg font-bold text-sm">추가</button>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden select-none touch-none">
+            {renderGrid()}
+          </div>
+          <p className="text-xs text-center text-slate-400 mt-2">* 원하는 색상을 누르고 표를 드래그하거나 터치하여 색칠하세요.</p>
+        </div>
+      );
+    };
+
+    // ==========================================
+    // 3. 지수의 루틴 (Routine) + 포도알 연동
+    // ==========================================
+    const RoutineApp = ({ data, updateData }) => {
+      const [date, setDate] = useState(getTodayStr());
+      
+      const toggleStatus = (itemId, status) => {
+        const newHist = { ...data.history };
+        if (!newHist[date]) newHist[date] = {};
+        if (newHist[date][itemId] === status) delete newHist[date][itemId];
+        else newHist[date][itemId] = status;
+        updateData({ ...data, history: newHist });
+      };
+
+      const restAll = (catId) => {
+        const cat = data.categories.find(c => c.id === catId);
+        if(!cat) return;
+        const newHist = { ...data.history };
+        if (!newHist[date]) newHist[date] = {};
+        cat.items.forEach(item => newHist[date][item.id] = 'rest');
+        updateData({ ...data, history: newHist });
+      };
+
+      const getGrapeStats = (itemId) => {
+        let comp = 0;
+        Object.values(data.history).forEach(day => {
+          if (day[itemId] === 'completed') comp++;
+        });
+        return { bunches: Math.floor(comp/100), current: comp%100 };
+      };
+
+      return (
+        <div className="fade-in space-y-4">
+          <div className="flex justify-between items-center bg-white p-3 rounded-xl shadow-sm border border-slate-100">
+            <button onClick={() => setDate(addDays(date, -1))} className="p-2 text-slate-400">&lt;</button>
+            <span className="font-bold text-lg text-emerald-600">{date} 루틴</span>
+            <button onClick={() => setDate(addDays(date, 1))} className="p-2 text-slate-400">&gt;</button>
+          </div>
+
+          {data.categories.length === 0 && <p className="text-center text-slate-400 py-10">설정에서 루틴을 추가해주세요. 기존 루틴 앱의 데이터가 자동으로 복구되었습니다!</p>}
+
+          {data.categories.map(cat => (
+            <Accordion key={cat.id} title={cat.name} rightElement={<button onClick={()=>restAll(cat.id)} className="text-xs bg-orange-100 text-orange-600 px-2 py-1 rounded shadow-sm">전체 휴식</button>}>
+              {cat.items.map(item => {
+                const status = data.history[date]?.[item.id];
+                const stats = getGrapeStats(item.id);
+                return (
+                  <div key={item.id} className="flex flex-col p-3 mb-2 bg-slate-50 rounded-xl border border-slate-100">
+                    <div className="flex justify-between items-center mb-2">
+                      <span className={`font-medium ${status ? 'text-slate-400 line-through' : 'text-slate-700'}`}>{item.name}</span>
+                      <div className="flex gap-1">
+                        <button onClick={() => toggleStatus(item.id, 'rest')} className={`p-2 rounded-lg ${status==='rest'?'bg-orange-200 text-orange-700':'bg-white text-slate-400'}`}><Icons.Rest/></button>
+                        <button onClick={() => toggleStatus(item.id, 'completed')} className={`p-2 rounded-lg ${status==='completed'?'bg-emerald-200 text-emerald-700':'bg-white text-slate-400'}`}><Icons.Check/></button>
+                      </div>
+                    </div>
+                    <div className="bg-white p-2 rounded-lg border border-emerald-50 flex items-center justify-between text-xs">
+                      <span className="font-bold text-purple-600">🍇 {stats.bunches}송이</span>
+                      <div className="flex-1 mx-2 bg-purple-100 h-2 rounded-full overflow-hidden">
+                        <div className="bg-purple-500 h-full transition-all" style={{width: `${stats.current}%`}}></div>
+                      </div>
+                      <span className="text-slate-500">{stats.current}/100</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </Accordion>
+          ))}
+        </div>
+      );
+    };
+
+    // ==========================================
+    // 4. 100일 포도알 챌린지 (Grape Challenge)
+    // ==========================================
+    const GrapeApp = ({ data, updateData }) => {
+      const [isOpen, setIsOpen] = useState(false);
+      const [title, setTitle] = useState('');
+      const [recordDate, setRecordDate] = useState(getTodayStr());
+
+      const handleAdd = () => {
+        if(!title) return;
+        const newC = { id: generateId(), title, records: {} }; 
+        updateData({ ...data, challenges: [...data.challenges, newC] });
+        setTitle(''); setIsOpen(false);
+      };
+
+      const toggleRecord = (cid) => {
+        const newC = data.challenges.map(c => {
+          if(c.id === cid) {
+            const newR = {...c.records};
+            if(newR[recordDate]) delete newR[recordDate]; else newR[recordDate] = true;
+            return {...c, records: newR};
+          }
+          return c;
+        });
+        updateData({...data, challenges: newC});
+      };
+
+      return (
+        <div className="fade-in space-y-4">
+          <button onClick={()=>setIsOpen(true)} className="w-full py-4 bg-purple-600 text-white rounded-xl font-bold flex justify-center gap-2 shadow-md"><Icons.Plus/> 새 포도알 챌린지</button>
+
+          {data.challenges.length === 0 && <p className="text-center text-slate-400 py-10">진행 중인 챌린지가 없습니다.</p>}
+
+          {data.challenges.map(c => {
+            const total = Object.keys(c.records).length;
+            const bunches = Math.floor(total/100);
+            const current = total % 100;
+
+            return (
+              <div key={c.id} className="bg-white p-5 rounded-2xl shadow-sm border border-purple-100">
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="font-bold text-lg text-slate-800">{c.title}</h3>
+                  <button onClick={()=>updateData({...data, challenges: data.challenges.filter(x=>x.id!==c.id)})} className="text-red-400"><Icons.Trash/></button>
+                </div>
+                <div className="flex justify-between items-end mb-2">
+                  <span className="font-bold text-purple-700 bg-purple-100 px-3 py-1 rounded-full text-sm">완성된 포도: {bunches}송이 🍇</span>
+                  <span className="text-purple-500 font-bold">{current} / 100</span>
+                </div>
+                
+                <div className="bg-purple-50 p-3 rounded-xl mb-4">
+                  <div className="grid grid-cols-10 gap-1">
+                    {Array.from({length: 100}).map((_, i) => (
+                      <div key={i} className={`aspect-square rounded-full flex items-center justify-center text-[8px] font-bold ${i < current ? 'bg-purple-500 text-white shadow-sm' : 'bg-white text-slate-300 border border-slate-200'}`}>
+                        {i+1}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex gap-2">
+                  <input type="date" value={recordDate} onChange={e=>setRecordDate(e.target.value)} className="flex-1 p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm outline-none"/>
+                  <button onClick={()=>toggleRecord(c.id)} className={`px-4 rounded-lg font-bold text-white transition-colors ${c.records[recordDate] ? 'bg-red-400' : 'bg-purple-600'}`}>
+                    {c.records[recordDate] ? '기록 취소' : '포도알 칠하기'}
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+
+          {isOpen && (
+            <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl p-5 w-full max-w-sm">
+                <h3 className="font-bold text-lg mb-4">새 챌린지 추가</h3>
+                <input value={title} onChange={e=>setTitle(e.target.value)} placeholder="목표 이름" className="w-full p-3 bg-slate-50 rounded-lg mb-4 border border-slate-200"/>
+                <div className="flex gap-2">
+                  <button onClick={()=>setIsOpen(false)} className="flex-1 py-3 bg-slate-100 rounded-xl font-bold">취소</button>
+                  <button onClick={handleAdd} className="flex-1 py-3 bg-purple-600 text-white rounded-xl font-bold">만들기</button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    };
+
+    // ==========================================
+    // 5 & 6. 캘린더 (지니 & 롱이 스케줄) 공통 컴포넌트
+    // ==========================================
+    const CalendarApp = ({ data, updateData, type }) => {
+      const isGenie = type === 'genie';
+      const colors = isGenie ? { main: 'bg-teal-600', text: 'text-teal-600', light: 'bg-teal-50' } : { main: 'bg-pink-500', text: 'text-pink-500', light: 'bg-pink-50' };
+      const title = isGenie ? '지니의 스케줄 🧞‍♂️' : '롱이의 스케줄 🐶';
+
+      const [currentMonth, setCurrentMonth] = useState(new Date());
+      const [selectedDate, setSelectedDate] = useState(null);
+      
+      const year = currentMonth.getFullYear();
+      const month = currentMonth.getMonth();
+      const firstDay = new Date(year, month, 1).getDay();
+      const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+      const days = [];
+      for(let i=0; i<firstDay; i++) days.push(null);
+      for(let i=1; i<=daysInMonth; i++) days.push(`${year}-${String(month+1).padStart(2,'0')}-${String(i).padStart(2,'0')}`);
+
+      const handleSave = (dateStr, shift, note) => {
+        const newRecords = {...data.records};
+        newRecords[dateStr] = { shift, note };
+        updateData({...data, records: newRecords});
+        setSelectedDate(null);
+      };
+
+      const Modal = () => {
+        if(!selectedDate) return null;
+        const existing = data.records[selectedDate] || { shift: '', note: '' };
+        const [shift, setShift] = useState(existing.shift);
+        const [note, setNote] = useState(existing.note);
+
+        return (
+          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl p-5 w-full max-w-sm">
+              <h3 className="font-bold text-lg mb-4">{selectedDate} 일정</h3>
+              {isGenie && (
+                <div className="flex gap-2 mb-4">
+                  {['Day ☀️', 'Night 🌙', 'Off 📴'].map(s => {
+                    const val = s.split(' ')[0].toLowerCase();
+                    return <button key={s} onClick={()=>setShift(val)} className={`flex-1 py-2 rounded-lg font-bold border ${shift===val ? colors.main+' text-white' : 'bg-white text-slate-500'}`}>{s}</button>;
+                  })}
+                </div>
+              )}
+              <textarea value={note} onChange={e=>setNote(e.target.value)} placeholder="추가 일정이나 메모를 적어주세요." className="w-full p-3 bg-slate-50 rounded-lg mb-4 border border-slate-200 h-24"></textarea>
+              <div className="flex gap-2">
+                <button onClick={()=>setSelectedDate(null)} className="flex-1 py-3 bg-slate-100 rounded-xl font-bold">닫기</button>
+                <button onClick={()=>handleSave(selectedDate, shift, note)} className={`flex-1 py-3 ${colors.main} text-white rounded-xl font-bold`}>저장</button>
+              </div>
+            </div>
+          </div>
+        );
+      };
+
+      return (
+        <div className="fade-in">
+          <div className="flex justify-between items-center bg-white p-3 rounded-xl shadow-sm border border-slate-100 mb-4">
+            <button onClick={() => setCurrentMonth(new Date(year, month-1, 1))} className="p-2 text-slate-400">&lt;</button>
+            <span className={`font-bold text-lg ${colors.text}`}>{year}년 {month+1}월 {title}</span>
+            <button onClick={() => setCurrentMonth(new Date(year, month+1, 1))} className="p-2 text-slate-400">&gt;</button>
+          </div>
+
+          <div className="bg-white rounded-2xl shadow-sm p-3 border border-slate-100">
+            <div className="grid grid-cols-7 gap-1 text-center font-bold text-xs text-slate-400 mb-2">
+              <div className="text-red-400">일</div><div>월</div><div>화</div><div>수</div><div>목</div><div>금</div><div className="text-blue-400">토</div>
+            </div>
+            <div className="grid grid-cols-7 gap-1">
+              {days.map((d, i) => {
+                if(!d) return <div key={i} className="aspect-square"></div>;
+                const record = data.records[d];
+                const dayNum = parseInt(d.split('-')[2]);
+                return (
+                  <div key={d} onClick={()=>setSelectedDate(d)} className={`aspect-square p-1 rounded-lg border border-slate-50 flex flex-col items-center justify-start cursor-pointer active:scale-95 transition-transform ${record?.note || record?.shift ? colors.light : 'bg-white hover:bg-slate-50'}`}>
+                    <span className="text-xs font-medium mb-1">{dayNum}</span>
+                    {isGenie && record?.shift && <span className="text-[10px] font-black">{record.shift==='day'?'☀️':record.shift==='night'?'🌙':'📴'}</span>}
+                    {!isGenie && record?.note && <span className="text-[10px]">🐶</span>}
+                    {record?.note && <div className="w-1.5 h-1.5 rounded-full bg-slate-400 mt-1"></div>}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+          <Modal />
+        </div>
+      );
+    };
+
+    // ==========================================
+    // 7. 합리적 소비 진단 테스트
+    // ==========================================
+    const ConsumptionTest = () => {
+      const [answers, setAnswers] = useState(Array(6).fill(null));
+      const [showResult, setShowResult] = useState(false);
+
+      const questions = [
+        "1. 구매 전 24시간 이상 충분히 고민해보았는가?",
+        "2. 이 물건이 나의 현재 목표에 기여하는가?",
+        "3. 이미 나와 비슷한 기능을 하는 제품이 있는가?",
+        "4. 단지 '할인' 때문에 충동적으로 사고 싶은가?",
+        "5. 장기적으로(1년 이상) 꾸준히 쓸 계획이 있는가?",
+        "6. 소비 후 카드값을 보며 후회하지 않을 자신 있는가?"
+      ];
+
+      const calculateScore = () => {
+        if(answers.includes(null)) return alert("모든 항목에 답해주세요!");
+        let score = 0;
+        [0,1,4,5].forEach(i => { if(answers[i] === 'O') score += 10; });
+        [2,3].forEach(i => { if(answers[i] === 'X') score += 10; });
+        setShowResult(score);
+      };
+
+      if (showResult !== false) {
+        return (
+          <div className="fade-in bg-white p-8 rounded-3xl shadow-sm text-center border border-slate-100">
+            <h2 className="text-2xl font-black mb-2">진단 결과</h2>
+            <div className="text-6xl font-black text-rose-500 mb-6">{showResult}점</div>
+            {showResult >= 50 ? (
+              <div className="bg-emerald-50 text-emerald-700 p-4 rounded-xl font-bold">✨ 구매하셔도 좋을 거 같아요!</div>
+            ) : (
+              <div className="bg-rose-50 text-rose-700 p-4 rounded-xl font-bold">🤔 구매를 다시 한 번 고려해보세요.</div>
+            )}
+            <button onClick={()=>{setAnswers(Array(6).fill(null)); setShowResult(false);}} className="mt-8 w-full py-4 bg-slate-800 text-white rounded-xl font-bold">다시 테스트하기</button>
+          </div>
+        );
+      }
+
+      return (
+        <div className="fade-in space-y-4 pb-10">
+          <div className="bg-rose-50 p-4 rounded-2xl border border-rose-100 mb-4">
+            <h2 className="font-bold text-rose-700 text-lg">합리적 소비 진단</h2>
+            <p className="text-sm text-rose-600 mt-1">사고 싶은 물건이 생겼나요? 구매 전 스스로를 점검해보세요.</p>
+          </div>
+
+          <div className="space-y-3">
+            {questions.map((q, i) => (
+              <div key={i} className="bg-white p-4 rounded-xl shadow-sm border border-slate-100">
+                <p className="font-medium text-slate-800 mb-3 text-sm">{q}</p>
+                <div className="flex gap-2">
+                  <button onClick={()=>{const n=[...answers]; n[i]='O'; setAnswers(n);}} className={`flex-1 py-2 rounded-lg font-bold border transition-colors ${answers[i]==='O' ? 'bg-rose-500 text-white border-rose-500' : 'bg-slate-50 text-slate-400 border-slate-200'}`}>O (그렇다)</button>
+                  <button onClick={()=>{const n=[...answers]; n[i]='X'; setAnswers(n);}} className={`flex-1 py-2 rounded-lg font-bold border transition-colors ${answers[i]==='X' ? 'bg-slate-500 text-white border-slate-500' : 'bg-slate-50 text-slate-400 border-slate-200'}`}>X (아니다)</button>
+                </div>
+              </div>
+            ))}
+          </div>
+          <button onClick={calculateScore} className="w-full py-4 bg-rose-500 text-white rounded-xl font-bold shadow-md mt-4 text-lg">결과 확인하기</button>
+        </div>
+      );
+    };
+
+    // ==========================================
+    // 메인 App & 홈 화면 (자동 마이그레이션 포함)
+    // ==========================================
+    const App = () => {
+      const [currentView, setCurrentView] = useState('home');
+      
+      // 데이터 로드 및 구버전 데이터 자동 마이그레이션
+      const [globalData, setGlobalData] = useState(() => {
+        const saved = localStorage.getItem('jisoo_all_data');
+        if (saved) return JSON.parse(saved);
+
+        // --- 구버전 데이터 자동 복구 로직 ---
+        const baseData = { ...defaultData };
+        let isMigrated = false;
+
+        // 1. 기존 루틴 데이터 복구 (jisoo_routine_data)
+        try {
+          const oldRoutine = localStorage.getItem('jisoo_routine_data');
+          if (oldRoutine) {
+            const parsed = JSON.parse(oldRoutine);
+            if (parsed.categories) baseData.routine.categories = parsed.categories;
+            if (parsed.history) baseData.routine.history = parsed.history;
+            isMigrated = true;
+          }
+        } catch(e){}
+
+        // 2. 기존 포도알 데이터 복구 (100days-challenges)
+        try {
+          const oldGrape = localStorage.getItem('100days-challenges');
+          if (oldGrape) {
+            const parsed = JSON.parse(oldGrape);
+            if (Array.isArray(parsed)) {
+              baseData.grape.challenges = parsed;
+              isMigrated = true;
+            }
+          }
+        } catch(e){}
+
+        // 마이그레이션 된 데이터가 있으면 즉시 새 박스에 저장
+        if (isMigrated) {
+          localStorage.setItem('jisoo_all_data', JSON.stringify(baseData));
+        }
+
+        return baseData;
+      });
+
+      useEffect(() => {
+        localStorage.setItem('jisoo_all_data', JSON.stringify(globalData));
+      }, [globalData]);
+
+      const updateSection = (section, data) => {
+        setGlobalData(prev => ({ ...prev, [section]: data }));
+      };
+
+      // 전체 데이터 백업/복원
+      const handleExport = () => {
+        const dataStr = JSON.stringify(globalData);
+        const blob = new Blob([dataStr], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = `jisoo_diary_backup_${getTodayStr()}.json`;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        alert("백업 파일이 안전하게 다운로드되었습니다.");
+      };
+
+      const handleImport = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          try {
+            const parsed = JSON.parse(event.target.result);
+            if(parsed.manual && parsed.routine) {
+              setGlobalData(parsed);
+              alert("데이터가 성공적으로 복원되었습니다!");
+            } else throw new Error();
+          } catch { alert("올바른 백업 파일이 아닙니다."); }
+        };
+        reader.readAsText(file);
+      };
+
+      const menus = [
+        { id: 'manual', title: '나 사용법', icon: '📖', color: 'bg-indigo-100 text-indigo-700' },
+        { id: 'planner', title: '데일리 플래너', icon: '📝', color: 'bg-blue-100 text-blue-700' },
+        { id: 'routine', title: '지수의 루틴', icon: '✨', color: 'bg-emerald-100 text-emerald-700' },
+        { id: 'grape', title: '포도알 챌린지', icon: '🍇', color: 'bg-purple-100 text-purple-700' },
+        { id: 'genie', title: '지니의 스케줄', icon: '🧞‍♂️', color: 'bg-teal-100 text-teal-700' },
+        { id: 'longie', title: '롱이의 스케줄', icon: '🐶', color: 'bg-pink-100 text-pink-700' },
+        { id: 'test', title: '소비 진단 테스트', icon: '🛒', color: 'bg-rose-100 text-rose-700' }
+      ];
+
+      const renderView = () => {
+        switch(currentView) {
+          case 'manual': return <ManualApp data={globalData.manual} updateData={(d)=>updateSection('manual',d)} />;
+          case 'planner': return <PlannerApp data={globalData.planner} updateData={(d)=>updateSection('planner',d)} navigateTo={setCurrentView} />;
+          case 'routine': return <RoutineApp data={globalData.routine} updateData={(d)=>updateSection('routine',d)} />;
+          case 'grape': return <GrapeApp data={globalData.grape} updateData={(d)=>updateSection('grape',d)} />;
+          case 'genie': return <CalendarApp data={globalData.genie} updateData={(d)=>updateSection('genie',d)} type="genie" />;
+          case 'longie': return <CalendarApp data={globalData.longie} updateData={(d)=>updateSection('longie',d)} type="longie" />;
+          case 'test': return <ConsumptionTest />;
+          default: return (
+            <div className="fade-in pb-10">
+              <div className="mb-6 flex justify-between items-center bg-white p-4 rounded-2xl shadow-sm border border-slate-100">
+                <div>
+                  <h1 className="text-xl font-black text-slate-800">지수의 올인원</h1>
+                  <p className="text-sm text-slate-500">오늘도 알찬 하루 보내세요!</p>
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={handleExport} className="p-2 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200" title="전체 데이터 백업"><Icons.Download/></button>
+                  <label className="p-2 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 cursor-pointer" title="전체 데이터 복원">
+                    <Icons.Upload/>
+                    <input type="file" accept=".json" onChange={handleImport} className="hidden" />
+                  </label>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                {menus.map((m, i) => (
+                  <button key={m.id} onClick={() => setCurrentView(m.id)} className={`p-5 rounded-2xl shadow-sm border border-slate-50 flex flex-col items-start gap-3 transition-transform active:scale-95 bg-white`}>
+                    <div className={`w-12 h-12 flex items-center justify-center rounded-full text-2xl ${m.color}`}>{m.icon}</div>
+                    <span className="font-bold text-slate-800 text-left">{m.title}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          );
+        }
+      };
+
+      const currentMenu = menus.find(m => m.id === currentView);
+
+      return (
+        <div className="min-h-screen max-w-md mx-auto relative bg-slate-50">
+          {currentView !== 'home' && (
+            <header className="sticky top-0 bg-white/80 backdrop-blur-md z-40 border-b border-slate-100 p-4 flex items-center justify-between env-safe-area-top">
+              <button onClick={() => setCurrentView('home')} className="flex items-center gap-1 text-slate-500 font-bold active:text-slate-800"><Icons.Back/> 홈으로</button>
+              <span className="font-black text-slate-800">{currentMenu?.title} {currentMenu?.icon}</span>
+              <div className="w-8"></div>
+            </header>
+          )}
+          <main className="p-4 pt-6">{renderView()}</main>
+        </div>
+      );
+    };
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
+```eof
