@@ -8,6 +8,7 @@
   <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 
   <style>
     body { -webkit-tap-highlight-color: transparent; background-color: #f8fafc; font-family: 'Pretendard', sans-serif; }
@@ -174,7 +175,7 @@
     };
 
     // ==========================================
-    // 2. 데일리 플래너 (10 Min Planner) - 완벽 수정본
+    // 2. 데일리 플래너 (10 Min Planner)
     // ==========================================
     const PlannerApp = ({ data, updateData, navigateTo }) => {
       const [date, setDate] = useState(getTodayStr());
@@ -184,9 +185,8 @@
       const [selection, setSelection] = useState([]); // 드래그 중인 덩어리(인덱스 배열)
       
       const [taskName, setTaskName] = useState('');
-      const [taskColor, setTaskColor] = useState('#93c5fd'); // 기본 파스텔 블루
+      const [taskColor, setTaskColor] = useState('#93c5fd');
       
-      // 예쁜 파스텔 팔레트 8종
       const pastelPalette = [
         '#fca5a5', '#fdba74', '#fcd34d', '#86efac', 
         '#93c5fd', '#c4b5fd', '#f472b6', '#cbd5e1'
@@ -195,9 +195,8 @@
       const currentDayRecords = data.records[date] || {};
 
       const isDraggingRef = useRef(false);
-      const dragModeRef = useRef('select'); // 'select', 'paint', 'erase'
+      const dragModeRef = useRef('select'); 
 
-      // 모바일 드래그 중 화면 스크롤 방지 및 부드러운 드래그 처리
       useEffect(() => {
         const handleUp = () => { isDraggingRef.current = false; };
         window.addEventListener('pointerup', handleUp);
@@ -232,9 +231,8 @@
           dragModeRef.current = 'paint';
           processDragIndex(idx, 'paint');
         } else {
-          // 아무 할 일도 선택하지 않고 표를 문지르면 임시 선택(회색) 모드
           dragModeRef.current = 'select';
-          setSelection([idx]); // 새 드래그 시 기존 선택 초기화 후 새로 잡기
+          setSelection([idx]); 
         }
       };
 
@@ -254,6 +252,10 @@
         if (idx !== null) {
           processDragIndex(idx, dragModeRef.current);
         }
+      };
+
+      const handlePointerUp = () => {
+        isDraggingRef.current = false;
       };
 
       const processDragIndex = (idx, mode) => {
@@ -278,14 +280,9 @@
         }
       };
 
-      // 선택된 회색 덩어리에 새 할 일을 지정
       const handleAddAndAssign = () => {
-        if (selection.length === 0) {
-          return alert("시간표에서 영역을 드래그해서 먼저 지정해주세요!");
-        }
-        if (!taskName.trim()) {
-          return alert("할 일 이름을 입력해주세요!");
-        }
+        if (selection.length === 0) return alert("시간표에서 영역을 드래그해서 먼저 지정해주세요!");
+        if (!taskName.trim()) return alert("할 일 이름을 입력해주세요!");
         
         const newTask = { id: generateId(), name: taskName, color: taskColor, isArchived: false };
         const newTasks = [...data.tasks, newTask];
@@ -300,10 +297,9 @@
         updateData({ ...data, tasks: newTasks, records: newRecords });
         setSelection([]);
         setTaskName('');
-        setActiveTask(null); // 추가 후 선택 해제
+        setActiveTask(null);
       };
 
-      // 선택된 회색 덩어리에 기존 할 일을 칠함
       const handleAssignExistingTask = (taskId) => {
         if (taskId === 'eraser') {
           setActiveTask(activeTask === 'eraser' ? null : 'eraser');
@@ -312,7 +308,6 @@
         }
 
         if (selection.length > 0) {
-          // 이미 덩어리를 잡아놨으면 거기에 칠함
           let newRecords = { ...data.records };
           if (!newRecords[date]) newRecords[date] = {};
           selection.forEach(idx => {
@@ -322,13 +317,11 @@
           setSelection([]);
           setActiveTask(null);
         } else {
-          // 잡아놓은 덩어리가 없으면, 해당 항목을 브러시(펜)로 선택
           setActiveTask(activeTask === taskId ? null : taskId);
         }
       };
 
       const handleDeleteTask = (taskId) => {
-        // 아카이브 처리로 목록에서만 안 보이게 (과거 칠한 건 남겨둠)
         updateData({ 
           ...data, 
           tasks: data.tasks.map(t => t.id === taskId ? { ...t, isArchived: true } : t) 
@@ -336,7 +329,6 @@
         if (activeTask === taskId) setActiveTask(null);
       };
 
-      // 연속된 시간 덩어리 그룹화 및 무게중심(정중앙) 좌표 찾기
       const chunks = useMemo(() => {
         const result = [];
         const visited = new Set();
@@ -348,7 +340,6 @@
             const q = [i];
             visited.add(i);
             
-            // 인접 칸 BFS 탐색 (같은 taskId 끼리 묶음)
             while(q.length > 0) {
               const curr = q.shift();
               cells.push(curr);
@@ -368,7 +359,6 @@
               }
             }
             
-            // 무게중심(Centroid) 계산
             let sumRow = 0, sumCol = 0;
             cells.forEach(idx => {
               sumRow += Math.floor(idx / 6);
@@ -402,7 +392,6 @@
               onTouchMove={handlePointerMove}
               onPointerMove={handlePointerMove}
             >
-              {/* 셀별 배경색 및 터치 영역 */}
               {Array.from({length:144}).map((_, idx) => {
                  const taskId = currentDayRecords[idx];
                  const task = data.tasks.find(t => t.id === taskId);
@@ -413,18 +402,16 @@
                       key={idx}
                       data-idx={idx}
                       onPointerDown={(e) => handlePointerDown(e, idx)}
-                      className={`border-r border-b border-slate-200 transition-colors ${isEditMode ? 'cursor-pointer' : ''} ${task ? 'shadow-inner' : ''}`}
+                      className={`border-r border-b border-slate-200 transition-colors relative flex items-center justify-center ${isEditMode ? 'cursor-pointer' : ''} ${task ? 'shadow-inner' : ''}`}
                       style={{ backgroundColor: task ? task.color : (isSelected ? '#e2e8f0' : 'transparent') }}
                     ></div>
                  )
               })}
               
-              {/* 완벽한 중앙에 글씨 띄우기 (absolute 위치 활용) */}
               {chunks.map((chunk, i) => {
                  const task = data.tasks.find(t => t.id === chunk.taskId);
                  if (!task) return null;
                  
-                 // (avgRow + 0.5) / 24 * 100 -> 그리드의 % 높이
                  const topPercent = ((chunk.centroid.r + 0.5) / 24) * 100;
                  const leftPercent = ((chunk.centroid.c + 0.5) / 6) * 100;
 
@@ -464,7 +451,6 @@
              </button>
           </div>
 
-          {/* 편집 모드 패널 */}
           {isEditMode && (
             <div className="fade-in space-y-3">
               <div className="flex gap-2">
@@ -759,7 +745,7 @@
                 ...c.records,
                 [selectedDay]: { completed: true, note: recordNote, date: recordDate }
               }
-            }
+            };
           }
           return c;
         });
@@ -879,6 +865,7 @@
 
       const [currentMonth, setCurrentMonth] = useState(new Date());
       const [selectedDate, setSelectedDate] = useState(null);
+      const calendarRef = useRef(null);
       
       const year = currentMonth.getFullYear();
       const month = currentMonth.getMonth();
@@ -896,6 +883,16 @@
         setSelectedDate(null);
       };
 
+      const handleExportImage = () => {
+        if (!calendarRef.current) return;
+        window.html2canvas(calendarRef.current, { scale: 2, backgroundColor: '#f8fafc' }).then(canvas => {
+          const link = document.createElement('a');
+          link.download = `${isGenie ? '지니' : '롱이'}_스케줄_${year}년_${month+1}월.png`;
+          link.href = canvas.toDataURL('image/png');
+          link.click();
+        });
+      };
+
       const Modal = () => {
         if(!selectedDate) return null;
         const existing = data.records[selectedDate] || { shift: '', note: '' };
@@ -908,9 +905,9 @@
               <h3 className="font-bold text-lg mb-4">{selectedDate} 일정</h3>
               {isGenie && (
                 <div className="flex gap-2 mb-4">
-                  {['Day ☀️', 'Night 🌙', 'Off 😌'].map(s => {
-                    const val = s.split(' ')[0].toLowerCase();
-                    return <button key={s} onClick={()=>setShift(shift === val ? '' : val)} className={`flex-1 py-2 rounded-lg font-bold border transition-colors ${shift===val ? colors.main+' text-white' : 'bg-white text-slate-500 hover:bg-slate-50'}`}>{s}</button>;
+                  {['DAY', 'NIGHT', 'OFF'].map(s => {
+                    const val = s.toLowerCase();
+                    return <button key={s} onClick={()=>setShift(shift === val ? '' : val)} className={`flex-1 py-2 rounded-lg font-black border transition-colors ${shift===val ? colors.main+' text-white' : 'bg-white text-slate-500 hover:bg-slate-50'}`}>{s}</button>;
                   })}
                 </div>
               )}
@@ -926,31 +923,50 @@
 
       return (
         <div className="fade-in pb-10">
-          <div className="flex justify-between items-center bg-white p-3 rounded-xl shadow-sm border border-slate-100 mb-4">
-            <button onClick={() => setCurrentMonth(new Date(year, month-1, 1))} className="p-2 text-slate-400">&lt;</button>
-            <span className={`font-bold text-lg ${colors.text}`}>{year}년 {month+1}월 {title}</span>
-            <button onClick={() => setCurrentMonth(new Date(year, month+1, 1))} className="p-2 text-slate-400">&gt;</button>
+          <div className="flex justify-end mb-2">
+            <button onClick={handleExportImage} className="text-xs bg-white border border-slate-200 text-slate-600 px-3 py-2 rounded-xl font-bold flex items-center gap-1 shadow-sm active:scale-95 transition-transform">
+               📸 캘린더 이미지로 저장
+            </button>
           </div>
 
-          <div className="bg-white rounded-2xl shadow-sm p-2 sm:p-3 border border-slate-100">
-            <div className="grid grid-cols-7 gap-1 text-center font-bold text-xs text-slate-400 mb-2">
-              <div className="text-red-400">일</div><div>월</div><div>화</div><div>수</div><div>목</div><div>금</div><div className="text-blue-400">토</div>
+          <div ref={calendarRef} className="bg-slate-50 p-2 -m-2 rounded-xl">
+            <div className="flex justify-between items-center bg-white p-3 rounded-xl shadow-sm border border-slate-100 mb-4">
+              <button onClick={() => setCurrentMonth(new Date(year, month-1, 1))} className="p-2 text-slate-400">&lt;</button>
+              <span className={`font-bold text-lg ${colors.text}`}>{year}년 {month+1}월 {title}</span>
+              <button onClick={() => setCurrentMonth(new Date(year, month+1, 1))} className="p-2 text-slate-400">&gt;</button>
             </div>
-            <div className="grid grid-cols-7 gap-1">
-              {days.map((d, i) => {
-                if(!d) return <div key={i} className="min-h-[5rem] sm:min-h-[6rem] bg-transparent"></div>;
-                const record = data.records[d];
-                const dayNum = parseInt(d.split('-')[2]);
-                const hasContent = record?.note || record?.shift;
-                return (
-                  <div key={d} onClick={()=>setSelectedDate(d)} className={`min-h-[5rem] sm:min-h-[6rem] p-1 rounded-xl border overflow-hidden flex flex-col items-center justify-start cursor-pointer active:scale-95 transition-transform ${hasContent ? `${colors.light} ${colors.border}` : 'bg-white border-slate-50 hover:bg-slate-50'}`}>
-                    <span className="text-[11px] sm:text-xs font-bold text-slate-700 mb-0.5">{dayNum}</span>
-                    {isGenie && record?.shift && <span className="text-xl sm:text-2xl leading-none mb-1 mt-0.5">{record.shift==='day'?'☀️':record.shift==='night'?'🌙':'😌'}</span>}
-                    {!isGenie && record?.note && <span className="text-xl sm:text-2xl leading-none mb-1 mt-0.5">🐶</span>}
-                    {record?.note && <div className="text-[9px] text-slate-600 w-full text-center leading-tight line-clamp-2 px-0.5">{record.note}</div>}
-                  </div>
-                );
-              })}
+
+            <div className="bg-white rounded-2xl shadow-sm p-2 sm:p-3 border border-slate-100">
+              <div className="grid grid-cols-7 gap-1 text-center font-bold text-xs text-slate-400 mb-2">
+                <div className="text-red-400">일</div><div>월</div><div>화</div><div>수</div><div>목</div><div>금</div><div className="text-blue-400">토</div>
+              </div>
+              <div className="grid grid-cols-7 gap-1">
+                {days.map((d, i) => {
+                  if(!d) return <div key={i} className="min-h-[5rem] sm:min-h-[6rem] bg-transparent"></div>;
+                  const record = data.records[d];
+                  const dayNum = parseInt(d.split('-')[2]);
+                  const hasContent = record?.note || record?.shift;
+                  return (
+                    <div key={d} onClick={()=>setSelectedDate(d)} className={`min-h-[5rem] sm:min-h-[6rem] p-1 rounded-xl border overflow-hidden flex flex-col items-center justify-start cursor-pointer active:scale-95 transition-transform ${hasContent ? `${colors.light} ${colors.border}` : 'bg-white border-slate-50 hover:bg-slate-50'}`}>
+                      <span className="text-[11px] sm:text-xs font-bold text-slate-700 mb-0.5">{dayNum}</span>
+                      
+                      {/* 수정된 글씨 UI 적용 파트 */}
+                      {isGenie && record?.shift && (
+                        <span className={`text-[12px] sm:text-[14px] font-black leading-none mb-1 mt-0.5 tracking-tight ${
+                          record.shift === 'day' ? 'text-orange-500' :
+                          record.shift === 'night' ? 'text-indigo-600' :
+                          'text-slate-400'
+                        }`}>
+                          {record.shift.toUpperCase()}
+                        </span>
+                      )}
+
+                      {!isGenie && record?.note && <span className="text-xl sm:text-2xl leading-none mb-1 mt-0.5">🐶</span>}
+                      {record?.note && <div className="text-[9px] text-slate-600 w-full text-center leading-tight line-clamp-2 px-0.5">{record.note}</div>}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </div>
           <Modal />
@@ -1021,7 +1037,7 @@
     };
 
     // ==========================================
-    // 메인 App & 홈 화면
+    // 메인 App & 홈 화면 (자동 마이그레이션 포함)
     // ==========================================
     const App = () => {
       const [currentView, setCurrentView] = useState('home');
