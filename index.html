@@ -455,7 +455,7 @@
                 <div className="flex gap-2 mb-4">
                   {['Day ☀️', 'Night 🌙', 'Off 📴'].map(s => {
                     const val = s.split(' ')[0].toLowerCase();
-                    return <button key={s} onClick={()=>setShift(val)} className={`flex-1 py-2 rounded-lg font-bold border ${shift===val ? colors.main+' text-white' : 'bg-white text-slate-500'}`}>{s}</button>;
+                    return <button key={s} onClick={()=>setShift(shift === val ? '' : val)} className={`flex-1 py-2 rounded-lg font-bold border ${shift===val ? colors.main+' text-white' : 'bg-white text-slate-500'}`}>{s}</button>;
                   })}
                 </div>
               )}
@@ -515,7 +515,7 @@
         "2. 이 물건이 나의 현재 목표에 기여하는가?",
         "3. 이미 비슷한 기능을 하는 제품이 있는가?",
         "4. 단지 '할인' 때문에 충동적으로 사고 싶은가?",
-        "5. 장기적으로(1년 이상) 꾸준히 쓸 계획이 있는가?",
+        "5. 장기적으로 꾸준히 쓸 계획이 있는가?",
         "6. 소비 후 카드값을 보며 후회하지 않을 자신 있는가?"
       ];
 
