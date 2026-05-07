@@ -37,6 +37,7 @@
       date.setDate(date.getDate() + days);
       return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
     };
+    const shortDate = (dStr) => dStr ? dStr.split('-').slice(1).join('/') : '';
 
     // --- 아이콘 ---
     const Icons = {
@@ -56,7 +57,7 @@
     // --- 전역 초기 데이터 ---
     const defaultData = {
       manual: { items: [], tags: [] },
-      planner: { tasks: [], records: {} },
+      planner: { events: {} }, // 완전히 새로운 events 데이터 구조 사용!
       routine: { categories: [], history: {} },
       grape: { challenges: [] },
       genie: { records: {} },
@@ -174,273 +175,301 @@
     };
 
     // ==========================================
-    // 2. 데일리 플래너 (10 Min Planner) - 다이렉트 캔버스 UX
+    // 2. 데일리 플래너 (10 Min Planner) - 완벽한 캔버스 & 시간 블록 방식
     // ==========================================
-    const PlannerApp = ({ data, updateData, navigateTo }) => {
+    const PlannerApp = ({ data, updateData }) => {
       const [date, setDate] = useState(getTodayStr());
-      const [isEditMode, setIsEditMode] = useState(false);
       
-      // UX 상태: 지우개 모드 여부, 현재 칠할 태스크(브러시)
-      const [isEraserMode, setIsEraserMode] = useState(false);
-      const [activeTask, setActiveTask] = useState(null); // taskId
+      // UX 모드: 'scroll' (이동), 'draw' (그리기), 'erase' (지우기)
+      const [interactionMode, setInteractionMode] = useState('scroll');
       
-      // 새 할 일 생성용 상태
-      const [taskName, setTaskName] = useState('');
-      const [taskColor, setTaskColor] = useState('#93c5fd');
+      // 캔버스 도구 상태
+      const [brushText, setBrushText] = useState('');
+      const [brushColor, setBrushColor] = useState('#93c5fd');
       
+      // 드래그 임시 상태
+      const [dragBlock, setDragBlock] = useState(null); // { start, current }
+      
+      // 개별 이벤트 수정 팝업 상태
+      const [editEvent, setEditEvent] = useState(null); 
+      
+      const containerRef = useRef(null);
+      const isDraggingRef = useRef(false);
+
       const pastelPalette = [
         '#fca5a5', '#fdba74', '#fcd34d', '#86efac', 
         '#93c5fd', '#c4b5fd', '#f472b6', '#cbd5e1'
       ];
 
-      const currentDayRecords = data.records[date] || {};
-      const isDraggingRef = useRef(false);
+      // 데이터가 없을 때를 대비한 안전망
+      const currentEvents = (data.events && data.events[date]) ? data.events[date] : [];
 
-      // 모바일 드래그 중 스크롤 방지 및 좌표 인식 최적화
-      useEffect(() => {
-        const handleUp = () => { isDraggingRef.current = false; };
-        window.addEventListener('pointerup', handleUp);
-        window.addEventListener('pointercancel', handleUp);
-        window.addEventListener('touchend', handleUp);
-        return () => {
-          window.removeEventListener('pointerup', handleUp);
-          window.removeEventListener('pointercancel', handleUp);
-          window.removeEventListener('touchend', handleUp);
-        };
-      }, []);
+      // 10분 = 12px (1시간 = 72px)
+      const SLOT_HEIGHT = 12;
+      const TOTAL_SLOTS = 144; // 24 * 6
 
-      const getIdxFromEvent = (e) => {
-        let clientX, clientY;
-        if (e.touches && e.touches.length > 0) {
-          clientX = e.touches[0].clientX; clientY = e.touches[0].clientY;
-        } else {
-          clientX = e.clientX; clientY = e.clientY;
-        }
-        const el = document.elementFromPoint(clientX, clientY);
-        if (el && el.dataset.idx !== undefined) return parseInt(el.dataset.idx);
-        return null;
+      // Y좌표를 슬롯 인덱스(0~143)로 변환
+      const getSlotIndex = (clientY) => {
+        if (!containerRef.current) return null;
+        const rect = containerRef.current.getBoundingClientRect();
+        const y = clientY - rect.top;
+        let idx = Math.floor(y / SLOT_HEIGHT);
+        if (idx < 0) idx = 0;
+        if (idx >= TOTAL_SLOTS) idx = TOTAL_SLOTS - 1;
+        return idx;
       };
 
-      // 핵심 UX: 선택 영역 없이 즉시 칠하거나 지우는 로직
-      const paintCell = (idx) => {
-        const newRecords = { ...data.records };
-        if (!newRecords[date]) newRecords[date] = {};
+      const handlePointerDown = (e) => {
+        if (interactionMode === 'scroll') return;
         
-        let changed = false;
-
-        if (isEraserMode) {
-          if (newRecords[date][idx]) {
-            delete newRecords[date][idx];
-            changed = true;
-          }
-        } else if (activeTask) {
-          if (newRecords[date][idx] !== activeTask) {
-            newRecords[date][idx] = activeTask;
-            changed = true;
-          }
-        }
-
-        if (changed) updateData({ ...data, records: newRecords });
-      };
-
-      const handlePointerDown = (e, idx) => {
-        if (!isEditMode) return;
-        if (e.target.releasePointerCapture && e.pointerId) e.target.releasePointerCapture(e.pointerId);
-        
-        // 펜을 들지 않고 그리기 모드에서 터치하면 경고
-        if (!isEraserMode && !activeTask) {
-          alert("아래 목록에서 할 일을 먼저 선택하거나 새로 만들어주세요!");
+        // 브러시 텍스트가 비어있고 그리기 모드일 때 경고
+        if (interactionMode === 'draw' && !brushText.trim()) {
+          alert('상단에 그릴 메모(이름)를 먼저 입력해주세요!');
           return;
         }
 
-        isDraggingRef.current = true;
-        paintCell(idx);
+        if (e.target.releasePointerCapture && e.pointerId) e.target.releasePointerCapture(e.pointerId);
+        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+        const idx = getSlotIndex(clientY);
+        
+        if (idx !== null) {
+          isDraggingRef.current = true;
+          setDragBlock({ start: idx, current: idx });
+        }
       };
 
       const handlePointerMove = (e) => {
-        if (!isDraggingRef.current || !isEditMode) return;
-        const idx = getIdxFromEvent(e);
-        if (idx !== null) paintCell(idx);
+        if (!isDraggingRef.current || interactionMode === 'scroll' || !dragBlock) return;
+        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+        const idx = getSlotIndex(clientY);
+        
+        if (idx !== null) {
+          setDragBlock(prev => ({ ...prev, current: idx }));
+        }
       };
 
-      // 새 할 일 생성 후 즉시 브러시로 장착
-      const handleCreateTask = () => {
-        if (!taskName.trim()) return alert("할 일 이름을 입력해주세요!");
-        
-        const newTask = { id: generateId(), name: taskName, color: taskColor, isArchived: false };
-        const newTasks = [...data.tasks, newTask];
-        
-        updateData({ ...data, tasks: newTasks });
-        setTaskName('');
-        setActiveTask(newTask.id); // 생성 후 바로 현재 펜으로 설정!
-        setIsEraserMode(false); // 그리기로 자동 전환
-      };
+      const handlePointerUp = () => {
+        if (!isDraggingRef.current || !dragBlock) return;
+        isDraggingRef.current = false;
 
-      const handleDeleteTask = (taskId) => {
-        updateData({ 
-          ...data, 
-          tasks: data.tasks.map(t => t.id === taskId ? { ...t, isArchived: true } : t) 
+        const startIdx = Math.min(dragBlock.start, dragBlock.current);
+        const endIdx = Math.max(dragBlock.start, dragBlock.current);
+        
+        setDragBlock(null);
+
+        // 오버랩 및 트리밍(지우개 스플릿) 로직!
+        let updatedEvents = [];
+        
+        for (let ev of currentEvents) {
+          if (ev.end < startIdx || ev.start > endIdx) {
+            // 영역 밖이면 그대로 보존
+            updatedEvents.push(ev);
+          } else {
+            // 겹치는 영역이 발생하면 쪼개거나 깎아냅니다.
+            if (ev.start < startIdx) {
+              updatedEvents.push({ ...ev, id: generateId(), end: startIdx - 1 });
+            }
+            if (ev.end > endIdx) {
+              updatedEvents.push({ ...ev, id: generateId(), start: endIdx + 1 });
+            }
+          }
+        }
+
+        // 그리기 모드일 경우 새로운 블록을 추가
+        if (interactionMode === 'draw') {
+          updatedEvents.push({
+            id: generateId(),
+            start: startIdx,
+            end: endIdx,
+            color: brushColor,
+            text: brushText
+          });
+        }
+
+        // 시간순 정렬
+        updatedEvents.sort((a, b) => a.start - b.start);
+
+        updateData({
+          ...data,
+          events: { ...(data.events || {}), [date]: updatedEvents }
         });
-        if (activeTask === taskId) setActiveTask(null);
       };
 
-      const activeTasksList = data.tasks.filter(t => !t.isArchived);
-      const activeTaskData = activeTasksList.find(t => t.id === activeTask);
+      // 블록 클릭 시 편집 팝업
+      const handleEventClick = (e, ev) => {
+        if (interactionMode !== 'scroll') return; // 스크롤 모드에서만 클릭 편집 가능
+        e.stopPropagation();
+        setEditEvent({ ...ev });
+      };
 
-      const renderGrid = () => {
-        return (
-          <div className="flex border-t border-slate-200">
-            <div className="w-10 sm:w-12 shrink-0 border-r border-slate-200 flex flex-col bg-slate-50">
-              {Array.from({length:24}).map((_, h) => (
-                 <div key={h} className="h-7 border-b border-slate-200 flex items-center justify-center text-[10px] font-bold text-slate-400 shrink-0">
-                   {String(h).padStart(2, '0')}
-                 </div>
-              ))}
-            </div>
-            
-            <div 
-              className={`flex-1 bg-white ${isEditMode ? 'touch-none' : ''}`} 
-              style={{ display: 'grid', gridTemplateRows: 'repeat(24, 1.75rem)', gridTemplateColumns: 'repeat(6, 1fr)' }}
-              onTouchMove={handlePointerMove}
-              onPointerMove={handlePointerMove}
-            >
-              {Array.from({length:144}).map((_, idx) => {
-                 const taskId = currentDayRecords[idx];
-                 const task = data.tasks.find(t => t.id === taskId);
-                 
-                 return (
-                    <div 
-                      key={idx}
-                      data-idx={idx}
-                      onPointerDown={(e) => handlePointerDown(e, idx)}
-                      className={`border-r border-b border-slate-200 transition-colors ${isEditMode ? 'cursor-pointer hover:opacity-80' : ''}`}
-                      style={{ backgroundColor: task ? task.color : 'transparent' }}
-                    ></div>
-                 )
-              })}
-            </div>
-          </div>
-        );
+      const handleSaveEdit = () => {
+        if (!editEvent.text.trim()) return alert("메모를 입력해주세요!");
+        const updatedEvents = currentEvents.map(ev => ev.id === editEvent.id ? editEvent : ev);
+        updateData({ ...data, events: { ...(data.events || {}), [date]: updatedEvents } });
+        setEditEvent(null);
+      };
+
+      const handleDeleteEdit = () => {
+        const updatedEvents = currentEvents.filter(ev => ev.id !== editEvent.id);
+        updateData({ ...data, events: { ...(data.events || {}), [date]: updatedEvents } });
+        setEditEvent(null);
       };
 
       return (
         <div className="fade-in space-y-4 pb-10">
+          
+          {/* 상단 날짜 컨트롤러 */}
           <div className="flex justify-between items-center bg-white p-3 rounded-xl shadow-sm border border-slate-100">
-            <button onClick={() => setDate(addDays(date, -1))} className="p-2 text-slate-400">&lt;</button>
-            <span className="font-bold text-lg text-blue-600">{date} 플래너</span>
-            <button onClick={() => setDate(addDays(date, 1))} className="p-2 text-slate-400">&gt;</button>
+            <button onClick={() => setDate(addDays(date, -1))} className="p-2 text-slate-400 hover:bg-slate-50 rounded-lg transition-colors">&lt;</button>
+            <span className="font-bold text-lg text-slate-800">{date} 플래너</span>
+            <button onClick={() => setDate(addDays(date, 1))} className="p-2 text-slate-400 hover:bg-slate-50 rounded-lg transition-colors">&gt;</button>
           </div>
 
-          <div className="flex justify-between items-center bg-white p-4 rounded-xl shadow-sm border border-slate-100">
-             <div>
-               <h3 className="font-bold text-sm text-slate-700">플래너 작성</h3>
-               <p className="text-[11px] text-slate-400 mt-1">{isEditMode ? '펜을 고르고 시간표를 문질러 색칠하세요.' : '편집 모드를 켜서 일정을 추가하세요.'}</p>
-             </div>
-             <button onClick={() => setIsEditMode(!isEditMode)} className={`px-4 py-2 rounded-xl font-bold text-sm shadow-sm transition-all ${isEditMode ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
-               {isEditMode ? '저장 및 편집 완료' : '✏️ 플래너 편집 모드'}
-             </button>
-          </div>
-
-          {/* 항목표 (범례) - 평소 모드에서도 활성화된 할 일 목록을 보여줍니다 */}
-          {!isEditMode && activeTasksList.length > 0 && (
-            <div className="bg-white p-3 rounded-xl shadow-sm border border-slate-100 flex flex-wrap gap-2 fade-in">
-              <span className="w-full text-xs font-bold text-slate-400 mb-1">나의 할 일 목록 (범례)</span>
-              {activeTasksList.map(t => (
-                <div key={t.id} className="px-3 py-1 rounded-full text-xs font-bold text-slate-800 shadow-sm border border-black/5" style={{backgroundColor: t.color}}>
-                  {t.name}
-                </div>
-              ))}
+          {/* 캔버스 컨트롤 패널 (텐미닛 스타일) */}
+          <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 sticky top-[72px] z-30 shadow-md">
+            {/* 토글 버튼 */}
+            <div className="flex bg-slate-100 p-1 rounded-xl mb-4">
+              <button 
+                onClick={() => setInteractionMode('scroll')}
+                className={`flex-1 py-2.5 rounded-lg font-bold text-sm transition-all ${interactionMode === 'scroll' ? 'bg-white shadow-sm text-slate-800' : 'text-slate-400'}`}
+              >👆 이동 / 수정</button>
+              <button 
+                onClick={() => setInteractionMode('draw')}
+                className={`flex-1 py-2.5 rounded-lg font-bold text-sm transition-all ${interactionMode === 'draw' ? 'bg-white shadow-sm text-blue-600' : 'text-slate-400'}`}
+              >✏️ 그리기</button>
+              <button 
+                onClick={() => setInteractionMode('erase')}
+                className={`flex-1 py-2.5 rounded-lg font-bold text-sm transition-all ${interactionMode === 'erase' ? 'bg-white shadow-sm text-red-500' : 'text-slate-400'}`}
+              >🧽 지우기</button>
             </div>
-          )}
 
-          {/* 편집 모드 패널 (텐미닛 플래너 직관적 UX) */}
-          {isEditMode && (
-            <div className="fade-in space-y-3">
-              <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100">
-                
-                {/* 1. 그리기 / 지우기 토글 */}
-                <div className="flex bg-slate-100 p-1 rounded-xl mb-4">
-                  <button 
-                    onClick={() => setIsEraserMode(false)}
-                    className={`flex-1 py-2 rounded-lg font-bold text-sm transition-all ${!isEraserMode ? 'bg-white shadow-sm text-blue-600' : 'text-slate-500'}`}
-                  >
-                    ✏️ 그리기
-                  </button>
-                  <button 
-                    onClick={() => setIsEraserMode(true)}
-                    className={`flex-1 py-2 rounded-lg font-bold text-sm transition-all ${isEraserMode ? 'bg-white shadow-sm text-red-500' : 'text-slate-500'}`}
-                  >
-                    🧽 지우기
-                  </button>
-                </div>
-
-                {/* 2. 현재 브러시 명확히 표시 */}
-                <div className="flex items-center gap-2 mb-4 bg-slate-50 p-3 rounded-xl border border-slate-100">
-                  <span className="font-bold text-xs text-slate-500">현재 브러시:</span>
-                  {isEraserMode ? (
-                    <span className="text-sm font-bold text-red-500 flex items-center gap-1">🧽 지우개 모드</span>
-                  ) : activeTaskData ? (
-                    <div className="flex items-center gap-1.5 bg-white px-2.5 py-1 rounded-md shadow-sm border border-black/5">
-                      <div className="w-3 h-3 rounded-full" style={{backgroundColor: activeTaskData.color}}></div>
-                      <span className="text-sm font-bold text-slate-700">{activeTaskData.name}</span>
-                    </div>
-                  ) : (
-                    <span className="text-xs font-bold text-blue-500 bg-blue-50 px-2 py-1 rounded">아래에서 할 일을 선택하세요 ⬇️</span>
-                  )}
-                </div>
-                
-                {/* 3. 할 일 목록 (누르면 브러시로 변경) */}
-                <h3 className="font-bold text-sm text-slate-700 mb-2">할 일 목록 <span className="font-normal text-xs text-slate-400">(클릭 시 펜 변경)</span></h3>
-                <div className="flex flex-wrap gap-2 mb-4 items-center">
-                  {activeTasksList.length === 0 && <span className="text-xs text-slate-400">등록된 항목이 없습니다.</span>}
-                  {activeTasksList.map(t => (
-                    <div 
-                      key={t.id} 
-                      onClick={() => { setActiveTask(t.id); setIsEraserMode(false); }} 
-                      className={`flex items-center gap-1 pl-3 pr-1 py-1.5 rounded-full text-xs font-bold text-slate-800 cursor-pointer transition-transform border ${activeTask === t.id && !isEraserMode ? 'border-slate-800 scale-105 shadow-md' : 'border-black/5 opacity-80 hover:opacity-100'}`} 
-                      style={{backgroundColor: t.color}}
-                    >
-                      <span className="py-0.5">{t.name}</span>
-                      <button onClick={(e) => { e.stopPropagation(); handleDeleteTask(t.id); }} className="w-5 h-5 rounded-full bg-white/50 flex items-center justify-center hover:bg-white/80 text-[10px] leading-none ml-1">&times;</button>
-                    </div>
+            {/* 그리기 모드일 때만 보이는 브러시 설정 */}
+            {interactionMode === 'draw' && (
+              <div className="fade-in border-t border-slate-100 pt-3">
+                <span className="text-[11px] font-bold text-slate-500 mb-2 block">펜 색상 선택</span>
+                <div className="flex flex-wrap gap-2 mb-3">
+                  {pastelPalette.map(c => (
+                    <button key={c} onClick={() => setBrushColor(c)} className={`w-8 h-8 rounded-full border-2 transition-transform ${brushColor === c ? 'border-slate-800 scale-110 shadow-sm' : 'border-transparent'}`} style={{backgroundColor: c}}></button>
                   ))}
                 </div>
+                <div className="flex gap-2 items-center">
+                  <input value={brushText} onChange={e=>setBrushText(e.target.value)} placeholder="메모할 일정을 적어주세요!" className="flex-1 p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm font-bold outline-none text-slate-700" />
+                </div>
+                <p className="text-[10px] text-blue-500 mt-2 text-center">📝 메모와 색상을 정했다면, 아래 시간표를 손가락으로 슥 문지르세요!</p>
+              </div>
+            )}
+            {interactionMode === 'scroll' && (
+              <p className="text-[11px] text-slate-500 text-center font-medium">화면을 스크롤하거나, 이미 그려진 블록을 눌러서 수정하세요.</p>
+            )}
+            {interactionMode === 'erase' && (
+              <p className="text-[11px] text-red-400 text-center font-bold animate-pulse">시간표 위를 문지르면 그만큼 블록이 지워집니다.</p>
+            )}
+          </div>
+
+          {/* 타임라인 캔버스 (세로형) */}
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+            <div className="flex relative">
+              {/* 왼쪽 시간 축 (00 ~ 23) */}
+              <div className="w-12 sm:w-14 flex-shrink-0 border-r border-slate-100 bg-slate-50/50">
+                {Array.from({length: 24}).map((_, h) => (
+                  <div key={h} className="flex justify-center items-start text-[10px] font-bold text-slate-400 -mt-1.5" style={{ height: `${SLOT_HEIGHT * 6}px` }}>
+                    {String(h).padStart(2, '0')}:00
+                  </div>
+                ))}
+              </div>
+              
+              {/* 오른쪽 그리기 영역 */}
+              <div 
+                ref={containerRef}
+                className={`flex-1 relative bg-white ${interactionMode !== 'scroll' ? 'touch-none' : ''}`}
+                style={{ height: `${TOTAL_SLOTS * SLOT_HEIGHT}px` }}
+                onPointerDown={handlePointerDown}
+                onPointerMove={handlePointerMove}
+                onPointerUp={handlePointerUp}
+                onTouchMove={handlePointerMove}
+                onTouchEnd={handlePointerUp}
+                onPointerCancel={handlePointerUp}
+                onMouseLeave={handlePointerUp}
+              >
+                {/* 1시간 단위 실선 */}
+                {Array.from({length: 24}).map((_, h) => (
+                  <div key={h} className="absolute w-full border-t border-slate-200" style={{ top: `${h * 6 * SLOT_HEIGHT}px` }}></div>
+                ))}
+                {/* 10분 단위 점선 */}
+                {Array.from({length: 144}).map((_, m) => (
+                  m % 6 !== 0 && <div key={m} className="absolute w-full border-t border-slate-100 border-dashed" style={{ top: `${m * SLOT_HEIGHT}px` }}></div>
+                ))}
+
+                {/* 확정된 이벤트 블록들 */}
+                {currentEvents.map(ev => (
+                  <div 
+                    key={ev.id}
+                    onClick={(e) => handleEventClick(e, ev)}
+                    className="absolute rounded-md shadow-sm border border-black/5 overflow-hidden transition-transform active:scale-[0.98]"
+                    style={{
+                      top: `${ev.start * SLOT_HEIGHT}px`,
+                      height: `${(ev.end - ev.start + 1) * SLOT_HEIGHT}px`,
+                      left: '4px',
+                      right: '4px',
+                      backgroundColor: ev.color,
+                      cursor: interactionMode === 'scroll' ? 'pointer' : 'default'
+                    }}
+                  >
+                    <div className="sticky top-0 p-1 sm:p-1.5">
+                      <span className="text-[11px] sm:text-xs font-black text-slate-800 leading-tight block break-words drop-shadow-sm">{ev.text}</span>
+                    </div>
+                  </div>
+                ))}
+
+                {/* 드래그 중인 임시 렌더링 블록 */}
+                {dragBlock && (
+                  <div 
+                    className={`absolute rounded-md opacity-80 border-2 border-dashed ${interactionMode === 'erase' ? 'bg-red-200 border-red-500' : 'border-black/20'}`}
+                    style={{
+                      top: `${Math.min(dragBlock.start, dragBlock.current) * SLOT_HEIGHT}px`,
+                      height: `${(Math.abs(dragBlock.current - dragBlock.start) + 1) * SLOT_HEIGHT}px`,
+                      left: '4px',
+                      right: '4px',
+                      backgroundColor: interactionMode === 'draw' ? brushColor : undefined,
+                      zIndex: 20
+                    }}
+                  >
+                    {interactionMode === 'draw' && brushText && (
+                      <div className="p-1 sm:p-1.5">
+                        <span className="text-[11px] sm:text-xs font-black text-slate-800 opacity-50">{brushText}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* 블록 편집 모달 */}
+          {editEvent && (
+            <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 fade-in">
+              <div className="bg-white rounded-3xl p-5 w-full max-w-xs shadow-2xl">
+                <h3 className="font-bold text-lg mb-4 text-slate-800">일정 수정</h3>
                 
-                {/* 4. 새 할 일 만들기 */}
-                <div className="pt-3 border-t border-slate-100">
-                  <span className="text-xs font-bold text-slate-500 mb-2 block">새로운 할 일 만들기</span>
-                  <div className="flex flex-wrap gap-2 mb-3">
-                    {pastelPalette.map(c => (
-                      <button key={c} onClick={() => setTaskColor(c)} className={`w-8 h-8 rounded-full border-2 transition-transform ${taskColor === c ? 'border-slate-800 scale-110 shadow-md' : 'border-transparent'}`} style={{backgroundColor: c}}></button>
-                    ))}
-                  </div>
-                  <div className="flex gap-2 items-center">
-                    <input value={taskName} onChange={e=>setTaskName(e.target.value)} placeholder="할 일 이름 입력" className="flex-1 min-w-0 p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-sm outline-none" />
-                    <button onClick={handleCreateTask} className="px-4 py-2.5 shrink-0 bg-slate-800 text-white rounded-lg font-bold text-sm whitespace-nowrap shadow-sm active:scale-95 transition-transform">생성</button>
-                  </div>
+                <label className="block text-xs font-bold text-slate-500 mb-1">메모 수정</label>
+                <input value={editEvent.text} onChange={e=>setEditEvent({...editEvent, text: e.target.value})} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl mb-4 font-bold outline-none"/>
+                
+                <label className="block text-xs font-bold text-slate-500 mb-1">색상 변경</label>
+                <div className="flex flex-wrap gap-2 mb-6">
+                  {pastelPalette.map(c => (
+                    <button key={c} onClick={() => setEditEvent({...editEvent, color: c})} className={`w-8 h-8 rounded-full border-2 transition-transform ${editEvent.color === c ? 'border-slate-800 scale-110 shadow-md' : 'border-transparent'}`} style={{backgroundColor: c}}></button>
+                  ))}
+                </div>
+
+                <div className="flex gap-2">
+                  <button onClick={handleDeleteEdit} className="px-4 py-3 bg-red-50 text-red-500 rounded-xl font-bold border border-red-100">삭제</button>
+                  <button onClick={()=>setEditEvent(null)} className="flex-1 py-3 bg-slate-100 rounded-xl font-bold text-slate-600">취소</button>
+                  <button onClick={handleSaveEdit} className="flex-1 py-3 bg-blue-600 text-white rounded-xl font-bold">저장</button>
                 </div>
               </div>
             </div>
           )}
 
-          <div className={`bg-white rounded-xl shadow-sm overflow-hidden select-none transition-all ${isEditMode ? 'border-2 border-blue-400 ring-4 ring-blue-50' : 'border border-slate-200'}`}>
-            <div className="flex bg-slate-100 border-b border-slate-200">
-               <div className="w-10 sm:w-12 shrink-0"></div>
-               <div className="flex-1 grid grid-cols-6 text-[10px] text-slate-500 font-bold text-center py-1.5">
-                 <div>00</div><div>10</div><div>20</div><div>30</div><div>40</div><div>50</div>
-               </div>
-            </div>
-            {renderGrid()}
-          </div>
-          
-          {isEditMode ? (
-            <div className="text-center mt-2 space-y-1">
-              <p className="text-xs text-blue-500 font-bold">👆 그리기 모드에서 펜을 선택하고 캔버스처럼 문질러 색칠하세요.</p>
-              <p className="text-xs text-red-400 font-medium">지울 때는 '🧽 지우기'를 누르고 칸을 문지르면 됩니다.</p>
-            </div>
-          ) : (
-            <p className="text-xs text-center text-slate-400 mt-2">플래너를 수정하려면 '편집 모드'를 켜주세요.</p>
-          )}
         </div>
       );
     };
